@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Local databases: demo data, rebuilt by `python -m app.seed`
+*.db
+
+# CDK
+infra/cdk.out/
+infra/.venv/
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local tool config (paths are machine-specific)
+.claude/

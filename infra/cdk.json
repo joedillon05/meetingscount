@@ -1,0 +1,7 @@
+{
+  "app": "python3 app.py",
+  "context": {
+    "region": "us-east-2",
+    "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true
+  }
+}

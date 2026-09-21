@@ -1,0 +1,24 @@
+# Local development against the same database engine production uses.
+#
+#   docker compose up -d
+#   export MC_DATABASE_URL=postgresql+psycopg2://mc:mc@localhost:5432/meetingscount
+#   alembic upgrade head && python -m app.seed
+#   uvicorn app.main:app --reload
+#
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mc
+      POSTGRES_PASSWORD: mc
+      POSTGRES_DB: meetingscount
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

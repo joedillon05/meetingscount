@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeetingsCount - Officer</title>
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  main { max-width:1360px; margin:0 auto; padding:14px 16px 70px; display:grid; gap:14px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(128px,1fr)); gap:10px; }
+  .tile { background:#fff; border:1px solid var(--line); border-radius:var(--radius); padding:11px 13px; }
+  .tile .v { font-size:25px; font-weight:700; line-height:1.1; }
+  .tile .k { font-size:12px; color:var(--muted); margin-top:2px; }
+  .tile.alert .v { color:#9b2222; }
+  .tile.warn .v { color:#7a5200; }
+
+  /* progress: counted (solid) + pending (hatched) against required */
+  .prog { display:flex; align-items:center; gap:7px; }
+  .prog .bar { position:relative; width:74px; height:9px; border-radius:5px; background:#eceef1; overflow:hidden; flex:none; }
+  .prog .bar i { position:absolute; top:0; bottom:0; left:0; }
+  .prog .bar .done { background:var(--ok); }
+  .prog .bar .pend { background:repeating-linear-gradient(135deg,#fab219,#fab219 3px,#ffe4a8 3px,#ffe4a8 6px); }
+  .prog .n { font-variant-numeric:tabular-nums; font-size:13px; white-space:nowrap; }
+  .prog .cat { font-size:11px; color:var(--muted); }
+  .reqcell { display:flex; flex-direction:column; gap:4px; }
+
+  table.grid { width:100%; border-collapse:collapse; font-size:13px; background:#fff; }
+  .grid th, .grid td { padding:9px 11px; border-bottom:1px solid #f0f1f3; text-align:left; vertical-align:middle; }
+  .grid th { background:#fafbfc; font-weight:600; color:var(--ink2); position:sticky; top:0; z-index:2; cursor:pointer; user-select:none; }
+  .grid th.sorted::after { content:" \2193"; } .grid th.sorted.asc::after { content:" \2191"; }
+  .grid tbody tr:hover { background:#f5f8ff; cursor:pointer; }
+  .grid tr.gone td { color:var(--muted); }
+  .wrap { overflow:auto; max-height:none; border:1px solid var(--line); border-radius:var(--radius); }
+
+  .split { display:grid; grid-template-columns:minmax(0,1fr) minmax(360px,460px); gap:14px; align-items:start; }
+  @media (max-width:1000px){ .split { grid-template-columns:1fr; } }
+  .qlist { display:grid; gap:8px; max-height:74vh; overflow:auto; }
+  .qitem { background:#fff; border:1px solid var(--line); border-left:4px solid var(--warn); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .qitem.rejected { border-left-color:var(--bad); }
+  .qitem.on { border-color:var(--accent); box-shadow:0 0 0 2px #dbe5fb; }
+  .qitem .top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .qitem .nm { font-weight:600; }
+  .qitem .sub { font-size:12px; color:var(--muted); margin-top:3px; }
+  .qitem .why { font-size:12px; color:#7a5200; margin-top:4px; }
+  .qitem .disp { font-size:12px; color:var(--accent); margin-top:4px; }
+
+  #qmap, #mmap { height:250px; border-radius:10px; background:#e9ebee; }
+  .reasons { list-style:none; padding:0; margin:8px 0 0; font-size:13px; }
+  .reasons li { padding:3px 0; display:flex; gap:7px; align-items:flex-start; }
+  .reasons .ic { flex:none; width:14px; font-weight:700; }
+  .reasons .ok { color:#0a6e0a; } .reasons .no { color:#9b2222; }
+
+  .head { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+  .head h1 { font-size:22px; margin:0; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 14px; font-size:13px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; }
+
+  .tl { border-left:2px solid var(--line); margin-left:8px; padding-left:16px; display:grid; gap:10px; }
+  .tl .ev { position:relative; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .tl .ev::before { content:""; position:absolute; left:-23px; top:14px; width:11px; height:11px; border-radius:50%; background:#fff; border:2px solid var(--line); }
+  .tl .ev.confirmed::before { background:var(--ok); border-color:var(--ok); }
+  .tl .ev.flagged::before { background:var(--warn); border-color:var(--warn); }
+  .tl .ev.rejected::before { background:var(--bad); border-color:var(--bad); }
+  .tl .ev .when { font-size:12px; color:var(--muted); }
+  .note { background:#f6f8fa; border-radius:8px; padding:7px 9px; font-size:13px; margin-top:7px; }
+  .note b { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+
+  .chart svg { display:block; width:100%; height:auto; }
+  .chart .gl { stroke:#e7e9ec; } .chart .lbl { fill:var(--muted); font-size:10px; }
+  .chart .val { fill:#fff; font-size:10px; font-weight:600; }
+  .chart .valo { fill:var(--ink2); font-size:10px; font-weight:600; }
+
+  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .toolbar input[type=search] { width:190px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:#fff; color:var(--ink2); border:0; border-right:1px solid var(--line); padding:7px 11px; font-size:13px; font-weight:500; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:#e8effd; color:var(--accent); font-weight:600; }
+  .switcher { display:flex; align-items:center; gap:6px; font-size:12px; }
+  .switcher select { width:auto; padding:5px 8px; font-size:13px; }
+  .devbadge { background:#fff3d6; color:#7a5200; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:600; }
+  .empty { padding:26px; text-align:center; color:var(--muted); background:#fff; border:1px dashed var(--line); border-radius:var(--radius); }
+  dialog { border:0; border-radius:14px; padding:0; max-width:760px; width:92vw; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  dialog::backdrop { background:rgba(0,0,0,.35); }
+  .dlg-head { display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .dlg-body { padding:14px 16px; max-height:70vh; overflow:auto; }
+  pre.json { background:#f6f8fa; padding:12px; border-radius:8px; font-size:12px; overflow:auto; max-height:44vh; }
+  .crumb { font-size:13px; color:var(--muted); }
+  .crumb a { cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">MeetingsCount</span>
+  <nav>
+    <a data-view="caseload">Caseload</a>
+    <a data-view="queue">Review queue <span id="qbadge"></span></a>
+    <a data-view="meetings">Meetings</a>
+    <a data-view="audit" id="navAudit" hidden>Audit</a>
+    <a href="/ops">Ops</a>
+    <a href="/">Check in</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="devbadge" id="devBadge" hidden>dev auth</span>
+  <span class="switcher"><label for="who" style="margin:0">Signed in as</label><select id="who"></select></span>
+  <button class="secondary" id="refresh">Refresh</button>
+</div>
+
+<main>
+  <!-- ================= CASELOAD ================= -->
+  <section id="v-caseload">
+    <div class="tiles" id="tiles"></div>
+    <div class="card" style="margin-top:14px">
+      <div class="toolbar" style="margin-bottom:10px">
+        <h2 style="margin:0">Caseload</h2>
+        <div class="seg" id="scopeSeg">
+          <button data-scope="all" class="on">Everyone</button>
+          <button data-scope="mine">My caseload</button>
+        </div>
+        <div class="seg" id="statusSeg">
+          <button data-st="" class="on">All</button>
+          <button data-st="short">Behind</button>
+          <button data-st="pending">Pending</button>
+          <button data-st="met">On track</button>
+        </div>
+        <input type="search" id="q" placeholder="Search name or case">
+        <span class="spacer"></span>
+        <span class="small muted" id="caseCount"></span>
+      </div>
+      <div class="wrap">
+        <table class="grid" id="caseTable">
+          <thead><tr>
+            <th data-k="name">Participant</th>
+            <th data-k="case_number">Case</th>
+            <th data-k="officer">Officer</th>
+            <th>This week</th>
+            <th data-k="last_checkin_at">Last check-in</th>
+            <th data-k="pending_reviews">To review</th>
+            <th data-k="overall">Status</th>
+          </tr></thead>
+          <tbody id="caseRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= REVIEW QUEUE ================= -->
+  <section id="v-queue" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0">Review queue</h2>
+        <div class="seg" id="qScopeSeg">
+          <button data-scope="all" class="on">Everyone</button>
+          <button data-scope="mine">My caseload</button>
+        </div>
+        <span class="spacer"></span>
+        <span class="small muted">Check-ins the engine could not settle. Nothing counts or fails until you decide.</span>
+      </div>
+    </div>
+    <div class="split" style="margin-top:14px">
+      <div class="qlist" id="qlist"></div>
+      <div class="card" id="qdetail"><div class="muted small">Pick an item to review.</div></div>
+    </div>
+  </section>
+
+  <!-- ================= PARTICIPANT ================= -->
+  <section id="v-participant" hidden>
+    <div class="crumb"><a id="backToCase">&larr; Caseload</a></div>
+    <div id="pdetail"></div>
+  </section>
+
+  <!-- ================= MEETINGS ================= -->
+  <section id="v-meetings" hidden>
+    <div class="split">
+      <div class="card">
+        <div class="toolbar" style="margin-bottom:10px">
+          <h2 style="margin:0">Meetings</h2>
+          <span class="spacer"></span>
+          <span class="small muted" id="mCount"></span>
+        </div>
+        <div class="wrap">
+          <table class="grid" id="mTable">
+            <thead><tr><th>Name</th><th>Type</th><th>Starts</th><th>Window</th><th>Radius</th><th>Counts</th><th></th></tr></thead>
+            <tbody id="mRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div style="display:grid;gap:14px">
+        <div class="card">
+          <h2>Add a meeting</h2>
+          <form id="newMeeting">
+            <label>Name</label><input name="name" required placeholder="AA Open Meeting - St. Andrew's">
+            <div class="grid2">
+              <div><label>Type</label><select name="category">
+                <option value="public">Public</option><option value="community_service">Community service</option>
+                <option value="therapy">Therapy</option><option value="private">Private</option></select></div>
+              <div><label>Starts</label><input name="starts_at" type="datetime-local" required></div>
+              <div><label>Latitude</label><input name="lat" type="number" step="any" required></div>
+              <div><label>Longitude</label><input name="lng" type="number" step="any" required></div>
+              <div><label>Length (min)</label><input name="duration_min" type="number" value="60"></div>
+              <div><label>Radius (ft)</label><input name="radius_ft" type="number" value="500"></div>
+              <div><label>Window (&plusmn; min)</label><input name="time_window_min" type="number" value="60"></div>
+              <div><label>Address</label><input name="address"></div>
+            </div>
+            <button class="block" type="submit">Create meeting</button>
+            <div class="small muted" style="margin-top:6px">Right-click the map to fill in the coordinates.</div>
+          </form>
+        </div>
+        <div class="card"><div id="mmap"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AUDIT ================= -->
+  <section id="v-audit" hidden>
+    <div class="card">
+      <div class="toolbar" style="margin-bottom:10px">
+        <h2 style="margin:0">Audit log</h2>
+        <span class="small muted">Every staff view of a person's record is written here. Append-only.</span>
+        <span class="spacer"></span>
+        <button class="secondary" id="runRetention" title="Drop raw coordinates past the retention window">Run retention job</button>
+      </div>
+      <div class="wrap"><table class="grid">
+        <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
+        <tbody id="aRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="reportDlg">
+  <div class="dlg-head"><b id="rTitle">Report</b><span class="spacer"></span>
+    <a class="btn secondary" id="rCsv" download>Download CSV</a>
+    <button class="secondary" onclick="reportDlg.close()">Close</button></div>
+  <div class="dlg-body"><div id="rSummary"></div><pre class="json" id="rJson"></pre></div>
+</dialog>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script>
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const ICON = { confirmed:'✓', flagged:'!', rejected:'✕' };
+const COLOR = { confirmed:'#0ca30c', flagged:'#fab219', rejected:'#d03b3b' };
+const OVERALL = { met:'On track', short:'Behind', pending:'Awaiting review', none:'No requirement' };
+const PILL = { met:'confirmed', short:'rejected', pending:'flagged', none:'ended' };
+
+let me = null, users = [], cases = [], stats = {}, queue = [], meetings = [], qSel = null;
+let qmap, mmap, qLayer, mLayer, mPin = null;
+let scope = 'all', qScope = 'all', statusFilter = '', sortKey = null, sortAsc = true;
+
+/* ---------- dev auth: act as whichever user is picked ---------- */
+function actingId() { try { return localStorage.getItem('mc_act') || ''; } catch (e) { return ''; } }
+async function api(path, opts = {}) {
+  const h = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (actingId()) h['X-MC-User'] = actingId();
+  const r = await fetch(path, { ...opts, headers: h });
+  if (!r.ok) throw new Error((await r.text()).slice(0, 300));
+  return r.status === 204 ? null : r.json();
+}
+
+/* ---------- formatting ---------- */
+const fmtDT = s => s ? new Date(s).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+const fmtD  = s => s ? new Date(s).toLocaleDateString([], { month:'short', day:'numeric' }) : '';
+function ago(s) {
+  if (!s) return 'never';
+  const m = Math.round((Date.now() - new Date(s)) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  if (m < 1440) return Math.round(m / 60) + ' h ago';
+  const d = Math.round(m / 1440);
+  return d + (d === 1 ? ' day ago' : ' days ago');
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const pill = (cls, text) => `<span class="pill ${cls}">${esc(text)}</span>`;
+
+function progress(r) {
+  const pct = n => Math.min(100, (n / Math.max(r.required, 1)) * 100);
+  return `<div class="prog" title="${r.counted} counted, ${r.pending} awaiting review, needs ${r.required}">
+    <span class="bar">
+      <i class="done" style="width:${pct(r.counted)}%"></i>
+      <i class="pend" style="left:${pct(r.counted)}%;width:${pct(r.pending)}%"></i>
+    </span>
+    <span class="n">${r.counted}/${r.required}${r.pending ? ` <span class="cat">+${r.pending}?</span>` : ''}</span>
+    <span class="cat">${esc(r.category.replace('_',' '))}</span>
+  </div>`;
+}
+
+/* ---------- routing ---------- */
+const VIEWS = ['caseload','queue','participant','meetings','audit'];
+function show(view) {
+  VIEWS.forEach(v => $('#v-' + v).hidden = v !== view);
+  $$('.topbar nav a[data-view]').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  if (view === 'queue') setTimeout(() => qmap && qmap.invalidateSize(), 60);
+  if (view === 'meetings') setTimeout(() => mmap && mmap.invalidateSize(), 60);
+}
+function route() {
+  const h = location.hash.slice(1) || 'caseload';
+  if (h.startsWith('participant/')) { show('participant'); tlLimit = 20; loadParticipant(+h.split('/')[1]); return; }
+  show(VIEWS.includes(h) ? h : 'caseload');
+  if (h === 'queue') loadQueue();
+  if (h === 'meetings') loadMeetings();
+  if (h === 'audit') loadAudit();
+}
+window.addEventListener('hashchange', route);
+$$('.topbar nav a[data-view]').forEach(a => a.onclick = () => location.hash = a.dataset.view);
+$('#backToCase').onclick = () => location.hash = 'caseload';
+
+/* ---------- boot ---------- */
+async function boot() {
+  try { users = await api('/api/users'); } catch (e) { users = []; }
+  if (users.length) {
+    $('#devBadge').hidden = false;
+    if (!actingId()) {
+      const first = users.find(u => u.role === 'officer') || users[0];
+      try { localStorage.setItem('mc_act', first.id); } catch (e) {}
+    }
+    $('#who').innerHTML = users.map(u =>
+      `<option value="${u.id}">${esc(u.name)} (${u.role})</option>`).join('');
+    $('#who').value = actingId();
+    $('#who').onchange = () => {
+      try { localStorage.setItem('mc_act', $('#who').value); } catch (e) {}
+      location.reload();
+    };
+  } else {
+    $('.switcher').hidden = true;
+  }
+  me = await api('/api/me');
+  $('#navAudit').hidden = me.role !== 'admin';
+  await refresh();
+  route();
+}
+
+async function refresh() {
+  [stats, cases] = await Promise.all([api('/api/stats'), api('/api/caseload')]);
+  renderTiles(); renderCases();
+  $('#qbadge').innerHTML = stats.pending_reviews
+    ? `<span class="pill flagged" style="margin-left:4px">${stats.pending_reviews}</span>` : '';
+  if (!$('#v-queue').hidden) loadQueue();
+}
+$('#refresh').onclick = () => refresh();
+
+/* ---------- caseload ---------- */
+function renderTiles() {
+  const behind = cases.filter(c => c.overall === 'short').length;
+  const t = [
+    ['', stats.participants, 'participants'],
+    ['', cases.filter(c => c.overall === 'met').length, 'on track this week'],
+    [behind ? 'alert' : '', behind, 'behind this week'],
+    [stats.pending_reviews ? 'warn' : '', stats.pending_reviews, 'awaiting review'],
+    ['', stats.checkins_this_week, 'check-ins this week'],
+    ['', stats.avg_confidence ?? '–', 'avg confidence'],
+    [stats.not_checked_out ? 'warn' : '', stats.not_checked_out, 'never checked out'],
+  ];
+  $('#tiles').innerHTML = t.map(([cls, v, k]) =>
+    `<div class="tile ${cls}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+}
+
+function visibleCases() {
+  const term = $('#q').value.trim().toLowerCase();
+  return cases.filter(c =>
+    (scope === 'all' || c.officer_id === me.id) &&
+    (!statusFilter || c.overall === statusFilter) &&
+    (!term || c.name.toLowerCase().includes(term) ||
+      (c.case_number || '').toLowerCase().includes(term)));
+}
+
+function renderCases() {
+  let rows = visibleCases();
+  if (sortKey) {
+    rows = [...rows].sort((a, b) => {
+      const x = a[sortKey] ?? '', y = b[sortKey] ?? '';
+      return (x > y ? 1 : x < y ? -1 : 0) * (sortAsc ? 1 : -1);
+    });
+  }
+  $('#caseCount').textContent = `${rows.length} of ${cases.length}`;
+  $('#caseRows').innerHTML = rows.map(c => {
+    const stale = c.last_checkin_at &&
+      (Date.now() - new Date(c.last_checkin_at)) > 10 * 864e5;
+    return `<tr data-id="${c.participant_id}" class="${stale ? 'gone' : ''}">
+      <td><b>${esc(c.name)}</b></td>
+      <td class="muted">${esc(c.case_number || '')}</td>
+      <td>${esc(c.officer || '')}</td>
+      <td><div class="reqcell">${c.requirements.length
+        ? c.requirements.map(progress).join('') : '<span class="muted small">none</span>'}</div></td>
+      <td title="${esc(c.last_checkin_at || '')}">${ago(c.last_checkin_at)}</td>
+      <td>${c.pending_reviews ? pill('flagged', c.pending_reviews) : '<span class="muted">0</span>'}</td>
+      <td>${pill(PILL[c.overall], OVERALL[c.overall])}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted" style="padding:22px">No participants match.</td></tr>';
+  $$('#caseRows tr[data-id]').forEach(tr =>
+    tr.onclick = () => location.hash = 'participant/' + tr.dataset.id);
+}
+
+$('#q').oninput = renderCases;
+$('#scopeSeg').onclick = e => { if (!e.target.dataset.scope) return;
+  scope = e.target.dataset.scope;
+  $$('#scopeSeg button').forEach(b => b.classList.toggle('on', b === e.target)); renderCases(); };
+$('#statusSeg').onclick = e => { if (e.target.dataset.st === undefined) return;
+  statusFilter = e.target.dataset.st;
+  $$('#statusSeg button').forEach(b => b.classList.toggle('on', b === e.target)); renderCases(); };
+$$('#caseTable th[data-k]').forEach(th => th.onclick = () => {
+  sortAsc = sortKey === th.dataset.k ? !sortAsc : true;
+  sortKey = th.dataset.k;
+  $$('#caseTable th').forEach(x => x.classList.remove('sorted', 'asc'));
+  th.classList.add('sorted'); if (sortAsc) th.classList.add('asc');
+  renderCases();
+});
+
+/* ---------- review queue ---------- */
+async function loadQueue() {
+  queue = await api('/api/reviews/queue' + (qScope === 'mine' ? '?mine_only=true' : ''));
+  renderQueue();
+}
+$('#qScopeSeg').onclick = e => { if (!e.target.dataset.scope) return;
+  qScope = e.target.dataset.scope;
+  $$('#qScopeSeg button').forEach(b => b.classList.toggle('on', b === e.target)); loadQueue(); };
+
+function renderQueue() {
+  if (!queue.length) {
+    $('#qlist').innerHTML = '<div class="empty">Nothing waiting. Every check-in has been decided.</div>';
+    $('#qdetail').innerHTML = '<div class="muted small">Nothing to review.</div>';
+    return;
+  }
+  $('#qlist').innerHTML = queue.map(c => {
+    const failed = whyFlagged(c);
+    return `<div class="qitem ${c.status} ${qSel === c.id ? 'on' : ''}" data-id="${c.id}">
+      <div class="top"><span class="nm">${esc(c.participant.name)}</span>
+        ${pill(c.status, ICON[c.status] + ' ' + c.status)}</div>
+      <div class="sub">${esc(c.meeting.name)} &middot; ${fmtDT(c.checked_in_at)} &middot; ${Math.round(c.distance_ft)} ft &middot; ${c.confidence}/100</div>
+      <div class="why">${esc(failed)}</div>
+      ${c.disputes.length ? '<div class="disp">↳ participant disputed this</div>' : ''}
+    </div>`;
+  }).join('');
+  $$('.qitem').forEach(el => el.onclick = () => selectQ(+el.dataset.id));
+  if (!queue.find(c => c.id === qSel)) selectQ(queue[0].id); else renderQDetail();
+}
+
+/* What actually dragged this check-in down: the hard failures if there are
+   any, otherwise the weakest soft signals. "soft signals only" tells a
+   reviewer nothing. */
+function whyFlagged(c) {
+  const failed = c.reasons.filter(r => !r.passed).map(r => r.reason);
+  if (failed.length) return failed.join('; ');
+  const weak = [...c.reasons].filter(r => r.weight > 0 && !/not configured/.test(r.reason))
+    .sort((a, b) => a.score - b.score).slice(0, 2)
+    .filter(r => r.score < 0.9).map(r => r.reason);
+  return weak.length ? 'weakest: ' + weak.join('; ') : 'confidence below the bar';
+}
+
+function selectQ(id) { qSel = id; $$('.qitem').forEach(e => e.classList.toggle('on', +e.dataset.id === id)); renderQDetail(); }
+
+function renderQDetail() {
+  const c = queue.find(x => x.id === qSel);
+  if (!c) return;
+  $('#qdetail').innerHTML = `
+    <div class="row"><h2 style="margin:0">${esc(c.participant.name)}</h2>${pill(c.status, ICON[c.status] + ' ' + c.status)}
+      <span class="spacer"></span><a class="small" href="#participant/${c.participant.participant_id}" id="qGo">full record</a></div>
+    <div class="small muted" style="margin-top:2px">${esc(c.meeting.name)} &middot; ${fmtDT(c.checked_in_at)}</div>
+    <div id="qmap" style="margin-top:10px"></div>
+    <ul class="reasons">${c.reasons.map(r =>
+      `<li><span class="ic ${r.passed ? 'ok' : 'no'}">${r.passed ? '✓' : '✕'}</span>
+        <span><b>${esc(r.name)}</b> &middot; ${esc(r.reason)}</span></li>`).join('')}</ul>
+    ${c.disputes.map(d => `<div class="note"><b>Participant's note &middot; ${fmtDT(d.created_at)}</b>${esc(d.message)}</div>`).join('')}
+    <label style="margin-top:12px">Your note (goes in the record)</label>
+    <input id="qNote" placeholder="What you checked, who you spoke to">
+    <div class="row" style="margin-top:10px">
+      <button id="qApprove">Counts toward requirement</button>
+      <button class="secondary" id="qDeny">Does not count</button>
+      <button class="secondary" id="qInfo">Need more info</button>
+    </div>
+    <div class="small muted" style="margin-top:8px">Confidence ${c.confidence}/100 &middot; ${Math.round(c.distance_ft)} ft from the meeting &middot; GPS ±${c.accuracy_m ? Math.round(c.accuracy_m) : '?'} m${c.ip ? ' &middot; IP ' + esc(c.ip) : ''}</div>`;
+
+  drawQMap(c);
+  const decide = async d => {
+    try {
+      await api('/api/reviews/' + c.id, { method:'POST',
+        body: JSON.stringify({ decision: d, note: $('#qNote').value.trim() || null }) });
+      qSel = null; await loadQueue(); await refresh();
+    } catch (e) { alert('Could not save: ' + e.message); }
+  };
+  $('#qApprove').onclick = () => decide('approved');
+  $('#qDeny').onclick = () => decide('denied');
+  $('#qInfo').onclick = () => decide('more_info');
+}
+
+function drawQMap(c) {
+  qmap = L.map('qmap', { attributionControl:false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(qmap);
+  const m = c.meeting;
+  const mk = L.circleMarker([m.lat, m.lng], { radius:7, color:'#111', fillOpacity:1 }).addTo(qmap).bindPopup(m.name);
+  L.circle([m.lat, m.lng], { radius:m.radius_ft / 3.28084, color:'#111', weight:1, dashArray:'4', fillOpacity:.05 }).addTo(qmap);
+  const layers = [mk];
+  if (c.lat != null) {
+    const you = L.circleMarker([c.lat, c.lng], { radius:8, color:COLOR[c.status], fillColor:COLOR[c.status], fillOpacity:.9 })
+      .addTo(qmap).bindPopup('Reported position');
+    if (c.accuracy_m) L.circle([c.lat, c.lng], { radius:c.accuracy_m, color:COLOR[c.status], weight:1, fillOpacity:.08 }).addTo(qmap);
+    layers.push(you);
+  }
+  qmap.fitBounds(L.featureGroup(layers).getBounds().pad(0.55));
+  setTimeout(() => qmap.invalidateSize(), 50);
+}
+
+/* ---------- participant detail ---------- */
+let tlLimit = 20;
+async function loadParticipant(id) {
+  $('#pdetail').innerHTML = '<div class="card muted">Loading…</div>';
+  let d;
+  try { d = await api('/api/participants/' + id); }
+  catch (e) { $('#pdetail').innerHTML = `<div class="card">Could not load: ${esc(e.message)}</div>`; return; }
+
+  const s = d.summary;
+  $('#pdetail').innerHTML = `
+    <div class="card">
+      <div class="head">
+        <div style="flex:1;min-width:220px">
+          <h1>${esc(d.name)}</h1>
+          <div class="small muted">Case ${esc(d.case_number || '—')} &middot; officer ${esc(d.officer || '—')} &middot; enrolled ${fmtD(d.enrolled_on)}</div>
+        </div>
+        <div>${pill(PILL[s.overall], OVERALL[s.overall])}</div>
+        <button class="secondary" id="btnReport">Compliance report</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Requirements</h2>
+      ${d.requirements.length ? d.requirements.map(r => `
+        <div style="margin-top:12px">
+          <div class="row">
+            <b>${r.count_required} &times; ${esc(r.category)} per ${esc(r.period)}</b>
+            <span class="small muted">${esc(r.order_reference || '')} &middot; from ${fmtD(r.starts_on)}${r.ends_on ? ' to ' + fmtD(r.ends_on) : ''}</span>
+          </div>
+          <div class="chart">${trendChart(r)}</div>
+        </div>`).join('') : '<div class="muted small">No active requirement on file.</div>'}
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="row"><h2 style="margin:0">Check-in history</h2><span class="spacer"></span>
+        <span class="small muted">${d.timeline.length} entries, newest first</span>
+        ${d.timeline.length > 20 ? '<button class="ghost" id="showAllTl">show all</button>' : ''}</div>
+      <div class="tl" style="margin-top:12px">
+        ${d.timeline.slice(0, tlLimit).map(ev => `
+          <div class="ev ${ev.status}">
+            <div class="row">
+              <b>${esc(ev.meeting.name)}</b>
+              ${pill(ev.status, ICON[ev.status] + ' ' + ev.status)}
+              ${ev.meeting.counts ? '' : '<span class="pill ended">self-tracked</span>'}
+              <span class="spacer"></span>
+              <span class="when">${fmtDT(ev.checked_in_at)}</span>
+            </div>
+            <div class="small muted" style="margin-top:3px">
+              ${Math.round(ev.distance_ft)} ft away &middot; confidence ${ev.confidence}/100 &middot;
+              ${ev.checked_out_at ? 'checked out ' + fmtDT(ev.checked_out_at) : '<span style="color:#7a5200">never checked out</span>'}
+              ${ev.pin_purged ? ' &middot; <span title="Coordinates dropped by the retention job">location purged</span>' : ''}
+            </div>
+            ${ev.status !== 'confirmed' ? `<ul class="reasons">${ev.reasons.filter(r => !r.passed).map(r =>
+              `<li><span class="ic no">✕</span><span>${esc(r.reason)}</span></li>`).join('')}</ul>` : ''}
+            ${ev.disputes.map(x => `<div class="note"><b>Participant's note</b>${esc(x.message)}</div>`).join('')}
+            ${ev.review ? `<div class="note"><b>Reviewed by ${esc(ev.review.by)} &middot; ${fmtDT(ev.review.at)}</b>
+              ${esc({approved:'Counts toward requirement', denied:'Does not count', more_info:'Waiting on more information'}[ev.review.decision])}${ev.review.note ? ' — ' + esc(ev.review.note) : ''}</div>` : ''}
+          </div>`).join('') || '<div class="muted small">No check-ins yet.</div>'}
+      </div>
+    </div>`;
+  const more = $('#showAllTl');
+  if (more) more.onclick = () => { tlLimit = 9999; loadParticipant(id); };
+  $('#btnReport').onclick = () => openReport(d.participant_id, d.name);
+}
+
+/* Weekly attendance against the requirement. Bars carry their own number, so
+   the colour is never the only thing telling you a week fell short. */
+function trendChart(r) {
+  const h = r.history; if (!h.length) return '<div class="muted small">No history yet.</div>';
+  const W = 720, H = 132, PAD = { l:26, r:10, t:12, b:26 };
+  const max = Math.max(r.count_required + 1, ...h.map(p => p.counted + p.pending));
+  const bw = (W - PAD.l - PAD.r) / h.length, y = v => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
+  const req = y(r.count_required);
+  let g = '';
+  for (let i = 0; i <= max; i++) if (max <= 8 || i % 2 === 0)
+    g += `<line class="gl" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(i)}" y2="${y(i)}"/>
+          <text class="lbl" x="${PAD.l - 5}" y="${y(i) + 3}" text-anchor="end">${i}</text>`;
+  const bars = h.map((p, i) => {
+    const x = PAD.l + i * bw + bw * 0.18, w = bw * 0.64;
+    const cTop = y(p.counted), pTop = y(p.counted + p.pending);
+    const short = p.counted < r.count_required;
+    return `
+      ${p.pending ? `<rect x="${x}" y="${pTop}" width="${w}" height="${Math.max(cTop - pTop, 0)}" rx="3"
+        fill="#fab219" opacity=".55"><title>${p.pending} awaiting review</title></rect>` : ''}
+      <rect x="${x}" y="${cTop}" width="${w}" height="${Math.max(y(0) - cTop, 0)}" rx="3"
+        fill="${short ? '#d03b3b' : '#0ca30c'}" opacity="${short ? .9 : 1}">
+        <title>Week of ${fmtD(p.starts)}: ${p.counted} counted, ${p.pending} pending, needs ${r.count_required}</title></rect>
+      ${p.counted === 0 && p.pending === 0 ? `<rect x="${x}" y="${y(0) - 2}" width="${w}" height="2"
+        fill="#c9ced6"><title>Week of ${fmtD(p.starts)}: none</title></rect>
+        <text class="valo" x="${x + w / 2}" y="${y(0) - 5}" text-anchor="middle">0</text>` : ''}
+      ${p.counted > 0 ? `<text class="${y(0) - cTop > 15 ? 'val' : 'valo'}" x="${x + w / 2}"
+        y="${y(0) - cTop > 15 ? cTop + 12 : cTop - 3}" text-anchor="middle">${p.counted}</text>` : ''}
+      <text class="lbl" x="${x + w / 2}" y="${H - 8}" text-anchor="middle">${fmtD(p.starts)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly attendance against the requirement">
+    ${g}${bars}
+    <line x1="${PAD.l}" x2="${W - PAD.r}" y1="${req}" y2="${req}" stroke="#1a1d21" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text class="lbl" x="${W - PAD.r}" y="${req - 4}" text-anchor="end">required ${r.count_required}</text>
+  </svg>`;
+}
+
+/* ---------- report ---------- */
+async function openReport(pid, name) {
+  const d = await api(`/api/reports/participant/${pid}?days=90`);
+  $('#rTitle').textContent = `Compliance report — ${name}`;
+  $('#rCsv').href = `/api/reports/participant/${pid}.csv?days=90`;
+  $('#rSummary').innerHTML = `
+    <div class="small muted">Last 90 days &middot; generated ${fmtDT(d.generated_at)} &middot;
+      verification hash <code>${d.content_hash.slice(0, 16)}</code></div>
+    <div style="margin:10px 0">${d.summary.requirements.map(progress).join('')}</div>
+    <div class="note">${esc(d.note)}</div>`;
+  $('#rJson').textContent = JSON.stringify(d, null, 2);
+  $('#reportDlg').showModal();
+}
+
+/* ---------- meetings ---------- */
+async function loadMeetings() {
+  meetings = await api('/api/meetings');
+  $('#mCount').textContent = `${meetings.length} meetings`;
+  $('#mRows').innerHTML = meetings.map(m => `
+    <tr data-id="${m.id}">
+      <td><b>${esc(m.name)}</b><div class="small muted">${esc(m.address || '')}</div></td>
+      <td>${esc(m.category.replace('_',' '))}</td>
+      <td>${fmtDT(m.starts_at)}<div class="small muted">${m.duration_min} min</div></td>
+      <td>${pill(m.window_state, { open:'open now', upcoming:'upcoming', in_progress:'in progress', ended:'ended' }[m.window_state])}
+        <div class="small muted">±${m.time_window_min} min</div></td>
+      <td>${m.radius_ft} ft</td>
+      <td>${m.counts ? '✓' : '<span class="muted">self-tracked</span>'}</td>
+      <td><button class="ghost" data-del="${m.id}">delete</button></td>
+    </tr>`).join('');
+  $$('#mRows [data-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    try { await api('/api/meetings/' + b.dataset.del, { method:'DELETE' }); loadMeetings(); }
+    catch (err) { alert(err.message); }
+  });
+  drawMMap();
+}
+
+function drawMMap() {
+  if (!mmap) {
+    mmap = L.map('mmap', { attributionControl:false }).setView([42.28, -83.74], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mmap);
+    mmap.on('contextmenu', e => {
+      mPin = e.latlng;
+      $('#newMeeting').lat.value = e.latlng.lat.toFixed(6);
+      $('#newMeeting').lng.value = e.latlng.lng.toFixed(6);
+    });
+  }
+  if (mLayer) mmap.removeLayer(mLayer);
+  mLayer = L.featureGroup().addTo(mmap);
+  meetings.forEach(m => {
+    L.circle([m.lat, m.lng], { radius:m.radius_ft / 3.28084, color:'#111', weight:1, dashArray:'4', fillOpacity:.04 }).addTo(mLayer);
+    L.circleMarker([m.lat, m.lng], { radius:6, color:'#111', fillOpacity:1 }).addTo(mLayer).bindPopup(m.name);
+  });
+  if (mLayer.getLayers().length) mmap.fitBounds(mLayer.getBounds().pad(0.2));
+  setTimeout(() => mmap.invalidateSize(), 50);
+}
+
+$('#newMeeting').onsubmit = async e => {
+  e.preventDefault();
+  const b = Object.fromEntries(new FormData(e.target));
+  ['lat','lng','duration_min','radius_ft','time_window_min'].forEach(k => b[k] = Number(b[k]));
+  b.starts_at = new Date(b.starts_at).toISOString();
+  if (!b.address) delete b.address;
+  try { await api('/api/meetings', { method:'POST', body: JSON.stringify(b) });
+    e.target.reset(); loadMeetings(); }
+  catch (err) { alert('Failed: ' + err.message); }
+};
+
+/* ---------- audit ---------- */
+async function loadAudit() {
+  let rows = [];
+  try { rows = await api('/api/audit?limit=300'); }
+  catch (e) { $('#aRows').innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; return; }
+  $('#aRows').innerHTML = rows.map(a => `<tr>
+    <td>${fmtDT(a.at)}</td><td>${esc(a.actor || '')}</td>
+    <td><code>${esc(a.action)}</code></td>
+    <td class="muted">${esc(a.target_type || '')}${a.target_id ? ' #' + a.target_id : ''}</td>
+    <td class="small">${esc(a.detail || '')}</td>
+    <td class="muted small">${esc(a.ip || '')}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="muted">Nothing logged yet.</td></tr>';
+}
+$('#runRetention').onclick = async () => {
+  const r = await api('/api/retention/run', { method:'POST' });
+  alert(`Purged coordinates from ${r.purged} check-in(s) older than the retention window.`);
+  loadAudit();
+};
+
+boot();
+</script>
+</body>
+</html>
