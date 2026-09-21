@@ -20,9 +20,8 @@ from sqlalchemy.orm import Session
 from .. import compliance
 from ..auth import audit, require
 from ..db import get_db
-from ..models import (
-    CheckIn, County, Meeting, MeetingSource, Participant, Review, Role, User,
-)
+from ..models import CheckIn, County, Meeting, MeetingSource, Participant, Role, User
+from ..reviewing import latest_decisions
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 STAFF = (Role.officer, Role.admin)
@@ -36,8 +35,7 @@ def _build(db: Session, p: Participant, tz: str, days: int) -> dict:
                Meeting.source != MeetingSource.personal)
         .order_by(CheckIn.checked_in_at.asc())
     ).all()
-    decisions = {r.checkin_id: r.decision.value for r in db.scalars(
-        select(Review).where(Review.checkin_id.in_([c.id for c, _ in rows] or [-1]))).all()}
+    decisions = {k: v.value for k, v in latest_decisions(db, [c.id for c, _ in rows]).items()}
 
     lines = []
     for c, m in rows:

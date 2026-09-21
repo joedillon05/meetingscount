@@ -123,7 +123,7 @@ def test_staff_never_see_personal_meetings_or_their_check_ins(client, ids):
     officer = ids["officer"]
     listed = client.get("/api/meetings", headers=as_(officer)).json()
     assert not any(m["id"] == mine["id"] for m in listed)
-    queue = client.get("/api/reviews/queue", headers=as_(officer)).json()
+    queue = client.get("/api/reviews/queue", headers=as_(officer)).json()["items"]
     assert not any(q["id"] == c["id"] for q in queue)
     pid = client.get("/api/me", headers=as_(who)).json()["participant_id"]
     detail = client.get(f"/api/participants/{pid}", headers=as_(officer)).json()

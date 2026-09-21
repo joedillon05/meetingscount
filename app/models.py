@@ -17,7 +17,7 @@ import enum
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
-    Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
+    Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
@@ -264,11 +264,15 @@ class Review(Base):
     """
     A human decision on a check-in the engine could not settle. This is the
     'a human decides anything that hurts' principle, in a table.
+
+    Append-only. A changed decision, or a decision after asking for more
+    information, is a new row; the latest row is the one that counts. See
+    app/reviewing.py.
     """
     __tablename__ = "reviews"
     id: Mapped[int] = mapped_column(primary_key=True)
     county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
-    checkin_id: Mapped[int] = mapped_column(ForeignKey("checkins.id"), unique=True, index=True)
+    checkin_id: Mapped[int] = mapped_column(ForeignKey("checkins.id"), index=True)
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     decision: Mapped[ReviewDecision] = mapped_column(Enum(ReviewDecision))
     note: Mapped[str | None] = mapped_column(Text)

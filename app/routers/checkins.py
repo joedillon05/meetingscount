@@ -11,9 +11,8 @@ from ..auth import audit, client_ip, current_user
 from ..config import settings
 from ..db import get_db
 from ..geo import haversine_m, meters_to_feet
-from ..models import (
-    CheckIn, CheckInStatus, Dispute, Meeting, MeetingSource, Review, Role, User,
-)
+from ..models import CheckIn, CheckInStatus, Dispute, Meeting, MeetingSource, Role, User
+from ..reviewing import note_out, review_out, states_for
 from ..schemas import CheckInIn, CheckOutIn, DisputeIn, checkin_out
 from ..verification import CheckInContext, MeetingSpec, verify
 
@@ -139,21 +138,16 @@ def my_checkins(db: Session = Depends(get_db), user: User = Depends(current_user
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
         .where(CheckIn.user_id == user.id).order_by(CheckIn.checked_in_at.desc())
     ).all()
-    ids = [c.id for c, _ in rows] or [-1]
-    reviews = {r.checkin_id: r for r in db.scalars(select(Review).where(Review.checkin_id.in_(ids)))}
-    notes: dict[int, list] = {}
-    for d in db.scalars(select(Dispute).where(Dispute.checkin_id.in_(ids))
-                        .order_by(Dispute.created_at)):
-        notes.setdefault(d.checkin_id, []).append(
-            {"message": d.message, "created_at": d.created_at.isoformat()})
-
+    states = states_for(db, [c for c, _ in rows])
     out = []
     for c, m in rows:
+        st = states[c.id]
         d = checkin_out(c, m, include_pin=True)
-        rv = reviews.get(c.id)
-        d["review"] = ({"decision": rv.decision.value, "note": rv.note,
-                        "by": rv.reviewer.name, "at": rv.created_at.isoformat()} if rv else None)
-        d["disputes"] = notes.get(c.id, [])
+        d["review"] = review_out(st.latest) if st.latest else None
+        d["reviews"] = [review_out(r) for r in st.history]
+        d["review_state"] = st.state
+        d["awaiting_reply"] = st.state == "waiting"
+        d["disputes"] = [note_out(n) for n in st.notes]
         out.append(d)
     return out
 

@@ -17,7 +17,7 @@ uvicorn app.main:app --reload
 
 | URL | Who it's for |
 |---|---|
-| `/officer` | Probation officer: caseload, review queue, participant records, reports |
+| `/officer` | Probation officer: caseload, review queue, participant records, reports. Admins also get the audit log |
 | `/` | Participant app (installable on a phone): consent, one-tap check-in and check-out, this week's progress, full history with every reason and every officer decision |
 | `/ops` | Developer: map of every check-in, and a simulator that needs no phone |
 | `/docs` | API reference |
@@ -28,7 +28,7 @@ participants. Each page remembers its own person, so being Aisha on the phone
 page never changes who you are on the dashboard.
 
 ```bash
-python -m pytest                    # 40 tests
+python -m pytest                    # 54 tests
 ```
 
 ### With Postgres, the way production runs
@@ -83,15 +83,41 @@ officer decides with the evidence in front of them, and only that decision
 affects compliance. Add a rule by writing a class with an `evaluate(ctx)`
 method and listing it in `DEFAULT_CRITERIA`.
 
+## The review queue
+
+Three tabs: **To decide**, **Waiting on participant**, and **Decided** (last
+14 days). Opening an item shows the map, each signal against its limit, what
+counting or not counting would do to that person's week, how check-ins
+usually go at that venue for everyone (aggregates only, nobody else named),
+and the person's own recent record.
+
+Three decisions, and the participant sees every note:
+
+| Decision | Note | What happens |
+|---|---|---|
+| Count it | optional | counts toward the requirement |
+| Don't count it | required | does not count |
+| Ask a question | required, it is the question | pending, never a miss. The item waits in the second tab; when the participant answers on their phone it comes back to the top of **To decide** |
+
+Reviews are append-only (`app/reviewing.py`). Changing a decision needs a
+reason and adds a row; the earlier decision stays, and the participant sees
+both. Decisions wait six seconds before they are sent, with an Undo, so a
+stray keystroke cannot count or fail anyone; anything still waiting is sent
+at once if the page closes. Keyboard: `j`/`k` to move, `a`/`d`/`q` to decide,
+`x` to select several for one bulk decision, `?` for the list.
+
 ## Compliance
 
 A requirement says "3 public meetings a week from Sep 1 to Dec 31". For each
 period, the system counts check-ins that count:
 
 - confirmed → counts
-- flagged, approved on review → counts
+- flagged or rejected, approved on review → counts
 - flagged, not yet reviewed → shown separately as pending, not counted
-- rejected, or denied on review → does not count
+- officer asked a question → pending until they decide, never a miss
+- rejected and undecided, or denied on review → does not count
+
+The latest review is the one that counts.
 
 One meeting counts once. Someone rejected from the parking lot who walks in
 and checks in again gets the better of the two results, not two credits, and a
@@ -114,13 +140,16 @@ app/
   auth.py          dev auth + Cognito JWT verification, roles, tenancy, audit
   verification.py  the criteria engine
   compliance.py    requirements -> is this person compliant?
+  reviewing.py     where each check-in stands with a human; every screen reads it
   seed.py          the demo county
   routers/         me (the signed-in person's own record), meetings, checkins,
                    caseload, reviews, reports, admin
 static/
-  officer.html     the officer dashboard
-  index.html       the participant app shell; the app is static/app/
-  app/             participant.js, participant.css, lib.js (shared helpers)
+  officer.html     the staff dashboard shell
+  index.html       the participant app shell
+  app/             tokens.css + base.css (shared design system), lib.js
+                   (shared helpers), participant.*, officer.js + officer.css,
+                   queue.js (the review queue)
   sw.js            service worker: caches the app shell, never API responses
   ops.html         map and simulator
 alembic/           migrations, including Postgres row-level security
@@ -136,9 +165,9 @@ code today:
 | Principle | Where it lives |
 |---|---|
 | Location read once, at the tap, never in the background | `static/index.html`, and the consent text on that page |
-| The court sees outcomes, not coordinates | `schemas.checkin_out(include_pin=...)`: pins are returned only for a check-in under review, or to the participant themselves |
+| The court sees outcomes, not coordinates | `schemas.checkin_out(include_pin=...)`: the caseload, record and queue list carry no pins. `GET /api/reviews/{id}` returns one check-in's pin and writes `view_review_item` to the audit log. The participant always sees their own |
 | Bulk location data is admin-only and audited | `/api/ops/checkins` |
-| A human decides anything that hurts | `Review`; the engine never writes a compliance failure on its own |
+| A human decides anything that hurts | `Review`; the engine never writes a compliance failure on its own. A denial or a changed decision must carry a reason (`reviewing.note_required`) |
 | The participant sees everything about themselves | `/api/checkins/mine`, `/api/my/progress` |
 | Every staff view of a record is logged | `auth.audit()`, called by every caseload and detail route |
 | Least privilege | `auth.require(*roles)` on every staff route |

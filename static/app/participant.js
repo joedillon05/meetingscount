@@ -6,7 +6,7 @@
 // plain words; nothing recorded about the person is hidden from them.
 
 import {
-  $, $$, ApiError, bestPosition, dateTime, day, dayKey, devIdentity, duration, esc, feet,
+  $, bestPosition, dateTime, day, dayKey, devIdentity, duration, esc, feet,
   greeting, icon, locationPermission, makeApi, minutesUntil, plural, relativeDay,
   setTimeZone, sheet, time, toast, weekday, weekKey, weekLabel,
 } from './lib.js';
@@ -44,7 +44,8 @@ function standing(c) {
   }
   if (r === 'approved') return { key: 'approved', label: 'Counted after review', tone: 'ok', icon: 'check' };
   if (r === 'denied') return { key: 'denied', label: 'Not counted', tone: 'bad', icon: 'x' };
-  if (r === 'more_info') return { key: 'more_info', label: 'Officer asked for more info', tone: 'warn', icon: 'note' };
+  if (r === 'more_info' && c.awaiting_reply) return { key: 'question', label: 'Your officer asked a question', tone: 'warn', icon: 'note' };
+  if (r === 'more_info') return { key: 'replied', label: 'Reply sent, in review', tone: 'warn', icon: 'clock' };
   if (c.status === 'confirmed') return { key: 'confirmed', label: 'Counted', tone: 'ok', icon: 'check' };
   if (c.status === 'flagged') return { key: 'flagged', label: 'In review', tone: 'warn', icon: 'clock' };
   return { key: 'rejected', label: 'Not confirmed', tone: 'bad', icon: 'x' };
@@ -181,6 +182,12 @@ function renderTab() {
 
 const firstName = n => String(n || '').split(' ')[0];
 
+/* "today", "tomorrow", or "on Mon, Jul 27", for the middle of a sentence. */
+function inlineDay(d) {
+  const r = relativeDay(d);
+  return ['Today', 'Tomorrow', 'Yesterday'].includes(r) ? r.toLowerCase() : `on ${r}`;
+}
+
 function logo() {
   return `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--brand)"/>
     <path d="M9.5 16.5l4.2 4.2 8.8-9.4" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -233,6 +240,7 @@ function viewToday() {
       <p class="muted">${esc(day(new Date()))}</p>
     </div>
 
+    ${questionCards()}
     ${active ? activeCard(active) : ''}
     ${progressCard()}
 
@@ -241,7 +249,7 @@ function viewToday() {
       ${openNow.length ? openNow.map(meetingCard).join('') : `
         <div class="card quiet">${icon('clock', 'muted')}
           <p>${active ? 'Nothing else is open right now.' : 'Nothing is open right now.'}
-          ${later[0] ? ` Next up: <b>${esc(later[0].name)}</b>, ${esc(relativeDay(later[0].starts_at).toLowerCase())} at ${time(later[0].starts_at)}.` : ''}</p>
+          ${later[0] ? ` Next up: <b>${esc(later[0].name)}</b>, ${esc(inlineDay(later[0].starts_at))} at ${time(later[0].starts_at)}.` : ''}</p>
         </div>`}
     </section>
 
@@ -257,6 +265,18 @@ function viewToday() {
       <span class="muted small">Therapy or anything not on the list. Only you see these.</span></span>${icon('arrow', 'muted')}
     </button>
   </div>`;
+}
+
+/* An officer asked something. It goes above everything else, because the
+   check-in stays pending until the participant answers. */
+function questionCards() {
+  return S.mine.filter(c => c.awaiting_reply).map(c => `
+    <section class="card question" aria-label="Question from your officer">
+      <span class="badge tone-warn">${icon('note')} ${esc(c.review.by || 'Your officer')} asked a question</span>
+      <p class="q-text">"${esc(c.review.note)}"</p>
+      <p class="small muted">About ${esc(c.meeting.name)}, ${esc(inlineDay(c.checked_in_at))} at ${time(c.checked_in_at)}. It stays pending until you answer.</p>
+      <button class="btn block" data-act="detail" data-id="${c.id}" type="button">Answer</button>
+    </section>`).join('');
 }
 
 function activeCard(c) {
@@ -564,15 +584,17 @@ const checkLine = c => r => {
   return `<li class="${kind}">${icon(ic)}<span>${esc(explain(r, c))}</span></li>`;
 };
 
-function noteForm(c) {
+function noteForm(c, answering = false) {
   return `<form class="note-form" data-note="${c.id}">
-    <label for="note-${c.id}">Add a note for your officer <span class="muted">(optional)</span></label>
-    <textarea id="note-${c.id}" rows="3" maxlength="2000" placeholder="For example: the meeting is in the basement and my signal was weak."></textarea>
-    <button class="btn secondary block" type="submit">Send note</button>
+    <label for="note-${c.id}">${answering ? 'Your answer' : 'Add a note for your officer <span class="muted">(optional)</span>'}</label>
+    <textarea id="note-${c.id}" rows="3" maxlength="2000" placeholder="${answering
+      ? 'Answer in your own words. Your officer sees this with the check-in.'
+      : 'For example: the meeting is in the basement and my signal was weak.'}"></textarea>
+    <button class="btn ${answering ? '' : 'secondary'} block" type="submit">${answering ? 'Send answer' : 'Send note'}</button>
   </form>`;
 }
 
-function wireNoteForm(root, c) {
+function wireNoteForm(root, c, onSent) {
   const f = root.querySelector('form[data-note]');
   if (!f) return;
   f.onsubmit = async e => {
@@ -583,6 +605,7 @@ function wireNoteForm(root, c) {
     btn.disabled = true; btn.textContent = 'Sending';
     try {
       await api(`/api/checkins/${c.id}/dispute`, { method: 'POST', body: JSON.stringify({ message: msg }) });
+      if (onSent) return onSent();
       f.outerHTML = `<p class="callout ok">${icon('check')} Note sent. Your officer will see it with this check-in.</p>`;
       refresh();
     } catch (err) {
@@ -666,11 +689,11 @@ function viewHistory() {
   }
   const weeks = {};
   S.mine.forEach(c => (weeks[weekKey(c.checked_in_at)] ||= []).push(c));
-  const needsYou = S.mine.filter(c => c.review?.decision === 'more_info');
+  const needsYou = S.mine.filter(c => c.awaiting_reply);
 
   return `<div class="stack">
     <h1 class="page">History</h1>
-    ${needsYou.length ? `<div class="callout warn">${icon('note')} Your officer asked for more information on ${plural(needsYou.length, 'check-in')}. Open it to add a note.</div>` : ''}
+    ${needsYou.length ? `<div class="callout warn">${icon('note')} Your officer asked a question about ${plural(needsYou.length, 'check-in')}. Open it to answer.</div>` : ''}
     ${Object.entries(weeks).map(([k, list]) => `
       <section class="week">
         <div class="row between"><h2 class="sec flush">${esc(weekLabel(k))}</h2>${weekTally(list)}</div>
@@ -698,23 +721,38 @@ function histRow(c) {
 }
 
 function detail(id) {
+  if (!S.mine.some(x => x.id === id)) return;
+  const sh = sheet(detailHtml(id), { label: 'Check-in details' });
+  wireDetail(sh, id);
+}
+
+/* After a note is sent, reload and redraw in place, so the thread shows it. */
+function wireDetail(sh, id) {
   const c = S.mine.find(x => x.id === id);
-  if (!c) return;
+  wireNoteForm(sh.body, c, async () => {
+    await refresh();
+    if (sh.el.open) { sh.set(detailHtml(id)); wireDetail(sh, id); toast(c.awaiting_reply ? 'Answer sent.' : 'Note sent.'); }
+  });
+  if (c.awaiting_reply) sh.body.querySelector('textarea')?.focus();
+}
+
+function detailHtml(id) {
+  const c = S.mine.find(x => x.id === id);
   const s = standing(c);
-  const rv = c.review;
-  const canNote = c.status !== 'confirmed' || rv;
-  const sh = sheet(`<div class="result left">
+  const asked = c.awaiting_reply;
+  const canNote = c.status !== 'confirmed' || c.reviews.length;
+  return `<div class="result left">
     <span class="badge tone-${s.tone}">${icon(s.icon)} ${esc(s.label)}</span>
     <h2>${esc(c.meeting.name)}</h2>
     <p class="muted">${esc(dateTime(c.checked_in_at))}${c.meeting.address ? ` · ${esc(c.meeting.address)}` : ''}</p>
 
-    ${rv ? `<div class="review tone-${s.tone}">
-      <b>${esc({ approved: 'Your officer counted this check-in', denied: 'Your officer decided this does not count',
-        more_info: 'Your officer needs more information' }[rv.decision])}</b>
-      ${rv.note ? `<p>"${esc(rv.note)}"</p>` : ''}
-      <span class="small muted">${esc(rv.by)} · ${esc(dateTime(rv.at))}</span></div>`
-    : c.status === 'flagged' && c.meeting.counts ? '<p class="callout warn">Waiting for your officer to review it. Until then it shows as pending, not missed.</p>'
-    : c.status === 'rejected' && c.meeting.counts ? '<p class="callout">Your officer will review this attempt along with any note you add.</p>' : ''}
+    ${!c.reviews.length && c.meeting.counts && c.status === 'flagged'
+      ? '<p class="callout warn">Waiting for your officer to review it. Until then it shows as pending, not missed.</p>'
+      : !c.reviews.length && c.meeting.counts && c.status === 'rejected'
+      ? '<p class="callout">Your officer will review this attempt along with any note you add.</p>' : ''}
+
+    ${thread(c)}
+    ${canNote ? noteForm(c, asked) : ''}
 
     ${c.pin_purged ? `<p class="callout">${icon('trash')} The exact location was deleted after ${S.me.policy.pin_retention_days} days, as promised. The result stays.</p>` : diagram(c)}
 
@@ -722,12 +760,24 @@ function detail(id) {
     <ul class="checks">${c.reasons.map(checkLine(c)).join('')}</ul>
     <p class="small muted">${c.checked_out_at ? `Checked out at ${time(c.checked_out_at)}.` : c.status === 'rejected' ? '' : 'No check-out recorded.'}
       Confidence score ${c.confidence} out of 100. The score helps your officer sort what to look at. It is not a decision.</p>
+  </div>`;
+}
 
-    ${c.disputes.length ? `<h3 class="sub">Your notes</h3>${c.disputes.map(d =>
-      `<div class="mynote"><p>${esc(d.message)}</p><span class="small muted">${esc(dateTime(d.created_at))}</span></div>`).join('')}` : ''}
-    ${canNote ? noteForm(c) : ''}
-  </div>`, { label: 'Check-in details' });
-  wireNoteForm(sh.body, c);
+/* Everything said about one check-in, in order: the officer's decisions and
+   questions, and the participant's own notes. Nothing is left out. */
+function thread(c) {
+  const ev = [
+    ...c.reviews.map(r => ({ at: r.at, who: 'officer', r })),
+    ...c.disputes.map(d => ({ at: d.created_at, who: 'you', d })),
+  ].sort((a, b) => new Date(a.at) - new Date(b.at));
+  if (!ev.length) return '';
+  const said = { approved: 'Counted this check-in', denied: 'Decided this does not count', more_info: 'Asked a question' };
+  return `<h3 class="sub">Between you and your officer</h3><ol class="thread">${ev.map(e => e.who === 'officer'
+    ? `<li class="from-officer tone-${{ approved: 'ok', denied: 'bad', more_info: 'warn' }[e.r.decision]}">
+        <b>${esc(e.r.by || 'Your officer')}: ${esc(said[e.r.decision])}</b>
+        ${e.r.note ? `<p>"${esc(e.r.note)}"</p>` : ''}<span class="small muted">${esc(dateTime(e.at))}</span></li>`
+    : `<li class="from-you"><b>You</b><p>${esc(e.d.message)}</p><span class="small muted">${esc(dateTime(e.at))}</span></li>`
+  ).join('')}</ol>`;
 }
 
 /* ---------- You ---------- */

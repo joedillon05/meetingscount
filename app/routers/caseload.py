@@ -12,12 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import compliance
+from .. import compliance, reviewing
 from ..auth import audit, require, scope_to_county
 from ..db import get_db
 from ..models import (
-    CheckIn, CheckInStatus, County, Dispute, Meeting, MeetingSource, Participant, Program,
-    Requirement, Review, Role, User,
+    CheckIn, County, Meeting, MeetingSource, Participant, Program, Requirement, Role, User,
 )
 from ..schemas import ParticipantIn, RequirementIn, checkin_out
 
@@ -41,19 +40,9 @@ def caseload(mine_only: bool = False, db: Session = Depends(get_db),
         q = q.where(Participant.officer_id == user.id)
     participants = db.scalars(q).all()
 
-    # Pending reviews per participant, in one query rather than N. Personal
-    # meetings are the participant's own business and stay out of every
-    # staff view, so they are joined out here too.
-    reviewed = select(Review.checkin_id)
-    pending_rows = db.execute(
-        select(CheckIn.user_id, func.count(CheckIn.id))
-        .join(Meeting, Meeting.id == CheckIn.meeting_id)
-        .where(Meeting.source != MeetingSource.personal)
-        .where(CheckIn.status.in_([CheckInStatus.flagged, CheckInStatus.rejected]))
-        .where(CheckIn.id.not_in(reviewed))
-        .group_by(CheckIn.user_id)
-    ).all()
-    pending = dict(pending_rows)
+    # Items waiting on a decision per participant. Personal meetings are the
+    # participant's own business and stay out of every staff view.
+    pending = reviewing.open_counts(db, user)
 
     last_rows = db.execute(
         select(CheckIn.user_id, func.max(CheckIn.checked_in_at))
@@ -97,23 +86,18 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
         .where(CheckIn.user_id == p.user_id, Meeting.source != MeetingSource.personal)
         .order_by(CheckIn.checked_in_at.desc())
     ).all()
-    decisions = {r.checkin_id: r for r in db.scalars(
-        select(Review).where(Review.checkin_id.in_([c.id for c, _ in rows] or [-1]))).all()}
-    disputes = {}
-    for d in db.scalars(select(Dispute).where(
-            Dispute.checkin_id.in_([c.id for c, _ in rows] or [-1]))).all():
-        disputes.setdefault(d.checkin_id, []).append(
-            {"message": d.message, "created_at": d.created_at.isoformat()})
+    states = reviewing.states_for(db, [c for c, _ in rows])
 
     timeline = []
     for c, m in rows:
-        # Staff see coordinates only for check-ins that need a human look.
-        d = checkin_out(c, m, include_pin=c.needs_review)
-        rv = decisions.get(c.id)
-        d["review"] = ({"decision": rv.decision.value, "note": rv.note,
-                        "by": rv.reviewer.name, "at": rv.created_at.isoformat()}
-                       if rv else None)
-        d["disputes"] = disputes.get(c.id, [])
+        # No coordinates here. The map for a check-in is in its review view,
+        # which is logged one check-in at a time (principle 3).
+        d = checkin_out(c, m)
+        st = states[c.id]
+        d["review"] = reviewing.review_out(st.latest) if st.latest else None
+        d["reviews"] = [reviewing.review_out(r) for r in st.history]
+        d["review_state"] = st.state
+        d["disputes"] = [reviewing.note_out(n) for n in st.notes]
         timeline.append(d)
 
     reqs = []

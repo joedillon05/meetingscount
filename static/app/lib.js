@@ -50,6 +50,22 @@ export function makeApi(identity) {
   };
 }
 
+/* Download a file from the API. A plain link cannot carry the identity
+   header, so fetch it, then hand the browser the bytes. */
+export function makeDownload(identity) {
+  return async function download(path, fallbackName = 'download') {
+    const headers = {};
+    if (identity.get()) headers['X-MC-User'] = identity.get();
+    const r = await fetch(path, { headers });
+    if (!r.ok) throw new ApiError(r.status, 'Could not prepare the file. Try again.');
+    const name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || fallbackName;
+    const a = Object.assign(document.createElement('a'),
+      { href: URL.createObjectURL(await r.blob()), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+}
+
 /* ---------- time ----------
    Everything shows in the county's timezone, because that is where the
    meetings are and where the week starts and ends. */
@@ -104,6 +120,17 @@ export function relativeDay(d, now = new Date()) {
   if (k === dayKey(new Date(now.getTime() + 864e5))) return 'Tomorrow';
   if (k === dayKey(new Date(now.getTime() - 864e5))) return 'Yesterday';
   return shortDay(d);
+}
+
+/* "just now", "12 min ago", "3 h ago", "2 days ago". */
+export function ago(d, now = Date.now()) {
+  if (!d) return 'never';
+  const m = Math.round((now - new Date(d).getTime()) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  if (m < 1440) return `${Math.round(m / 60)} h ago`;
+  const days = Math.round(m / 1440);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
 }
 
 export function minutesUntil(d, now = Date.now()) {
@@ -169,17 +196,23 @@ export async function locationPermission() {
 
 /* ---------- small UI pieces ---------- */
 let toastTimer;
-export function toast(msg) {
+/* A short message at the bottom of the screen. With `action`, it carries one
+   button (Undo) and stays up for `ms`. */
+export function toast(msg, { action, onAction, ms = 2800 } = {}) {
   let el = $('#toast');
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status');
     document.body.appendChild(el);
   }
-  el.textContent = msg;
+  el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button">${esc(action)}</button>` : ''}`;
+  el.classList.toggle('has-action', !!action);
+  if (action) {
+    el.querySelector('button').onclick = () => { el.classList.remove('show'); clearTimeout(toastTimer); onAction?.(); };
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 /* A bottom sheet on phones, a centred dialog on wider screens. Built on
@@ -224,6 +257,15 @@ const PATHS = {
   directions: '<path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"/><path d="M9.5 14v-2.5h5M12.5 9l2 2.5-2 2.5"/>',
   install: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M12 7v7M9 11l3 3 3-3"/>',
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
+  inbox: '<path d="M3.5 13.5l2.6-7.3A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.2l2.6 7.3V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/>',
+  users: '<circle cx="9" cy="8.5" r="3.3"/><path d="M3 19.5c.9-3.3 3.2-5 6-5s5.1 1.7 6 5"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 6M17.5 14.8c1.8.6 3 2.2 3.5 4.7"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  scroll: '<path d="M7 4h11a2 2 0 0 1 2 2v2h-4M7 4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8"/><path d="M9 9h5M9 12.5h6M9 16h4"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.6 2.3c-.8.4-1.2 1-1.2 1.9v.3"/><path d="M12 17v.2"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+  map: '<path d="M9 4.5l6 2.5 5.5-2.2v14.7L15 21.7l-6-2.5-5.5 2.2V6.7z"/><path d="M9 4.5v14.7M15 7v14.7"/>',
 };
 export function icon(name, cls = '') {
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"

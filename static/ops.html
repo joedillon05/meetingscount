@@ -162,7 +162,7 @@ async function load() {
 
   const f = $('#meetingFilter'), cur = f.value;
   f.innerHTML = '<option value="">All meetings</option>' +
-    meetings.map(m => `<option value="${m.id}">${esc(m.name)} — ${new Date(m.starts_at).toLocaleDateString()}</option>`).join('');
+    meetings.map(m => `<option value="${m.id}">${esc(m.name)}, ${new Date(m.starts_at).toLocaleDateString()}</option>`).join('');
   f.value = cur;
 
   const s = $('#simMeeting'), cs = s.value;

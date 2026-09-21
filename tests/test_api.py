@@ -75,7 +75,7 @@ def test_checkin_verdict_and_review_flow(client, ids):
     assert good["id"] != far["id"]
 
     # It appears in the queue, an officer decides, and it leaves the queue.
-    queue = client.get("/api/reviews/queue", headers=as_(ids["officer"])).json()
+    queue = client.get("/api/reviews/queue", headers=as_(ids["officer"])).json()["items"]
     assert any(c["id"] == far["id"] for c in queue)
 
     d = client.post(f"/api/reviews/{far['id']}", json={
@@ -83,13 +83,17 @@ def test_checkin_verdict_and_review_flow(client, ids):
         headers=as_(ids["officer"]))
     assert d.status_code == 201
 
-    queue2 = client.get("/api/reviews/queue", headers=as_(ids["officer"])).json()
+    queue2 = client.get("/api/reviews/queue", headers=as_(ids["officer"])).json()["items"]
     assert not any(c["id"] == far["id"] for c in queue2)
 
-    # Deciding twice is refused rather than silently overwriting the record.
+    # Reversing a decision without saying why is refused. Nothing is silently
+    # overwritten: a reasoned change is a new row, and the first one stays.
     again = client.post(f"/api/reviews/{far['id']}", json={"decision": "denied"},
                         headers=as_(ids["officer"]))
-    assert again.status_code == 409
+    assert again.status_code == 422
+    same = client.post(f"/api/reviews/{far['id']}", json={"decision": "approved", "note": "x"},
+                       headers=as_(ids["officer"]))
+    assert same.status_code == 409
 
 
 def test_demo_timestamp_override_is_honoured_in_demo_mode(client, ids):

@@ -6,9 +6,11 @@
 // when they don't. API responses are never cached. They hold personal data,
 // and a check-in against a stale meeting list would be worse than none.
 
-const CACHE = 'mc-shell-v1';
+const CACHE = 'mc-shell-v2';
 const SHELL = [
   '/',
+  '/static/app/tokens.css',
+  '/static/app/base.css',
   '/static/app/participant.css',
   '/static/app/participant.js',
   '/static/app/lib.js',

@@ -8,11 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import reviewing
 from ..auth import audit, require, scope_to_county
 from ..config import settings
 from ..db import get_db
 from ..models import (
-    AuditLog, CheckIn, CheckInStatus, Meeting, MeetingSource, Participant, Review, Role, User,
+    AuditLog, CheckIn, CheckInStatus, Meeting, MeetingSource, Participant, Role, User,
 )
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -29,7 +30,6 @@ def stats(db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
                                           Meeting, user)).all()
     participants = db.scalars(scope_to_county(select(Participant), Participant, user)).all()
     by_status = Counter(c.status.value for c in checkins)
-    decided = {r.checkin_id for r in db.scalars(select(Review)).all()}
     scored = [c.confidence for c in checkins if c.status != CheckInStatus.rejected]
     now = datetime.now(timezone.utc)
     week = now - timedelta(days=7)
@@ -43,7 +43,7 @@ def stats(db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
         "confirmed": by_status.get("confirmed", 0),
         "flagged": by_status.get("flagged", 0),
         "rejected": by_status.get("rejected", 0),
-        "pending_reviews": sum(1 for c in checkins if c.needs_review and c.id not in decided),
+        "pending_reviews": sum(reviewing.open_counts(db, user).values()),
         "avg_confidence": round(sum(scored) / len(scored)) if scored else None,
         "not_checked_out": sum(1 for c in checkins
                                if c.status != CheckInStatus.rejected and not c.checked_out_at),

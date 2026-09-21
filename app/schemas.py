@@ -50,7 +50,13 @@ class RequirementIn(BaseModel):
 
 class ReviewIn(BaseModel):
     decision: ReviewDecision
-    note: Optional[str] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class BulkReviewIn(BaseModel):
+    checkin_ids: list[int] = Field(min_length=1, max_length=200)
+    decision: ReviewDecision
+    note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class DisputeIn(BaseModel):

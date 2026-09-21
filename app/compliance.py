@@ -4,10 +4,13 @@ Turning check-ins into "is this person compliant?".
 A Requirement says N meetings of a category per week (or month). Compliance
 for a period counts the check-ins in that period that COUNT:
 
-  confirmed                      -> counts
-  flagged, approved on review    -> counts
-  flagged, not yet reviewed      -> pending (shown separately, not counted)
-  flagged, denied / rejected     -> does not count
+  confirmed                          -> counts
+  flagged or rejected, approved      -> counts
+  flagged, not yet reviewed          -> pending (shown separately, not counted)
+  officer asked for more information -> pending, whatever the engine said
+  denied, or rejected and undecided  -> does not count
+
+The latest review is the one that counts; see app/reviewing.py.
 
 Personal meetings a participant created themselves never count toward a court
 requirement, only toward their own tracking.
@@ -26,8 +29,9 @@ from sqlalchemy.orm import Session
 
 from .models import (
     CheckIn, CheckInStatus, Meeting, MeetingSource, Participant, Requirement,
-    RequirementPeriod, Review, ReviewDecision,
+    RequirementPeriod, ReviewDecision,
 )
+from .reviewing import latest_decisions
 
 
 def period_bounds(when: datetime, period: RequirementPeriod, tz: str) -> tuple[datetime, datetime]:
@@ -76,15 +80,13 @@ class PeriodResult:
         }
 
 
-def _decisions(db: Session, checkin_ids: list[int]) -> dict[int, ReviewDecision]:
-    if not checkin_ids:
-        return {}
-    rows = db.scalars(select(Review).where(Review.checkin_id.in_(checkin_ids))).all()
-    return {r.checkin_id: r.decision for r in rows}
-
-
-def evaluate(db: Session, req: Requirement, when: datetime, tz: str) -> PeriodResult:
-    """Compliance for the single period containing `when`."""
+def evaluate(db: Session, req: Requirement, when: datetime, tz: str,
+             overrides: dict[int, ReviewDecision] | None = None) -> PeriodResult:
+    """
+    Compliance for the single period containing `when`. `overrides` answers
+    "what if": the review screen uses it to show what a decision would change
+    before the officer makes it.
+    """
     start, end = period_bounds(when, req.period, tz)
 
     q = (select(CheckIn, Meeting)
@@ -96,7 +98,7 @@ def evaluate(db: Session, req: Requirement, when: datetime, tz: str) -> PeriodRe
 
     pairs = db.execute(q).all()
     eligible = [(c, m) for c, m in pairs if m.source != MeetingSource.personal]
-    decisions = _decisions(db, [c.id for c, _ in eligible])
+    decisions = latest_decisions(db, [c.id for c, _ in eligible]) | (overrides or {})
 
     # One meeting counts once, however many times someone tapped. A retry
     # after a rejection is normal (walk closer, wait for a better fix), so
@@ -121,6 +123,8 @@ def outcome(c: CheckIn, decision: ReviewDecision | None) -> int:
         return COUNTS                                    # includes an overridden rejection
     if c.status == CheckInStatus.confirmed:
         return COUNTS
+    if decision == ReviewDecision.more_info:
+        return PENDING                                   # waiting on the participant, not a miss
     if c.status == CheckInStatus.flagged and decision is None:
         return PENDING
     return NOT_COUNTED
