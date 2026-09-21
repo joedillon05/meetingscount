@@ -45,6 +45,10 @@ class Settings:
     # distance + verdict. Principle 2 in the big-picture doc.
     PIN_RETENTION_DAYS: int = int(os.environ.get("MC_PIN_RETENTION_DAYS", "30"))
 
+    # The wording of the participant consent screen. Bump it when the text
+    # changes in a way people should agree to again.
+    CONSENT_VERSION: str = "2026-09"
+
     @property
     def is_postgres(self) -> bool:
         return self.DATABASE_URL.startswith("postgresql")

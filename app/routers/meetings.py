@@ -11,6 +11,7 @@ from ..auth import audit, current_user, require, scope_to_county
 from ..db import get_db
 from ..models import CheckIn, Meeting, MeetingSource, Role, User
 from ..schemas import MeetingIn
+from .checkins import meeting_visible_to
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -40,14 +41,30 @@ def with_window(m: Meeting, now: datetime | None = None) -> dict:
 
 
 @router.get("")
-def list_meetings(db: Session = Depends(get_db), user: User = Depends(current_user)):
+def list_meetings(since: datetime | None = None, until: datetime | None = None,
+                  db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """
+    Meetings in the caller's county. `since` and `until` bound the start time,
+    which the phone uses to ask for "today and the next week" instead of
+    every meeting the county has ever held.
+    """
     q = scope_to_county(select(Meeting), Meeting, user).order_by(Meeting.starts_at.desc())
-    rows = db.scalars(q).all()
+    if since is not None:
+        q = q.where(Meeting.starts_at >= _aware(since))
+    if until is not None:
+        q = q.where(Meeting.starts_at < _aware(until))
     # A participant sees countable meetings plus their own personal ones.
+    # Staff never see personal meetings: those are the participant's own
+    # tracking (therapy, often) and the court has no business in them.
     if user.role == Role.participant:
-        rows = [m for m in rows
-                if m.source != MeetingSource.personal or m.created_by_id == user.id]
-    return [with_window(m) for m in rows]
+        q = q.where((Meeting.source != MeetingSource.personal) | (Meeting.created_by_id == user.id))
+    else:
+        q = q.where(Meeting.source != MeetingSource.personal)
+    return [with_window(m) for m in db.scalars(q).all()]
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 @router.post("", status_code=201)
@@ -72,7 +89,7 @@ def create_meeting(body: MeetingIn, request: Request,
 def get_meeting(meeting_id: int, db: Session = Depends(get_db),
                 user: User = Depends(current_user)):
     m = db.get(Meeting, meeting_id)
-    if not m:
+    if not meeting_visible_to(m, user):
         raise HTTPException(404, "meeting not found")
     return with_window(m)
 
@@ -81,7 +98,7 @@ def get_meeting(meeting_id: int, db: Session = Depends(get_db),
 def delete_meeting(meeting_id: int, request: Request, db: Session = Depends(get_db),
                    user: User = Depends(require(Role.officer, Role.admin))):
     m = db.get(Meeting, meeting_id)
-    if not m:
+    if not meeting_visible_to(m, user):
         raise HTTPException(404, "meeting not found")
     n = db.scalar(select(CheckIn).where(CheckIn.meeting_id == meeting_id))
     if n is not None:

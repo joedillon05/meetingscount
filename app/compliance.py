@@ -98,25 +98,32 @@ def evaluate(db: Session, req: Requirement, when: datetime, tz: str) -> PeriodRe
     eligible = [(c, m) for c, m in pairs if m.source != MeetingSource.personal]
     decisions = _decisions(db, [c.id for c, _ in eligible])
 
-    counted = pending = not_counted = 0
-    for c, _m in eligible:
-        if c.status == CheckInStatus.confirmed:
-            counted += 1
-        elif c.status == CheckInStatus.flagged:
-            d = decisions.get(c.id)
-            if d == ReviewDecision.approved:
-                counted += 1
-            elif d is None:
-                pending += 1
-            else:
-                not_counted += 1
-        else:                                            # rejected
-            if decisions.get(c.id) == ReviewDecision.approved:
-                counted += 1                             # officer overrode it
-            else:
-                not_counted += 1
+    # One meeting counts once, however many times someone tapped. A retry
+    # after a rejection is normal (walk closer, wait for a better fix), so
+    # each meeting takes the best outcome among its check-ins.
+    best: dict[int, int] = {}
+    for c, m in eligible:
+        o = outcome(c, decisions.get(c.id))
+        best[m.id] = max(best.get(m.id, o), o)
 
+    counted = sum(1 for o in best.values() if o == COUNTS)
+    pending = sum(1 for o in best.values() if o == PENDING)
+    not_counted = sum(1 for o in best.values() if o == NOT_COUNTED)
     return PeriodResult(start, end, req.count_required, counted, pending, not_counted)
+
+
+NOT_COUNTED, PENDING, COUNTS = 0, 1, 2
+
+
+def outcome(c: CheckIn, decision: ReviewDecision | None) -> int:
+    """Where one check-in stands. Ordered, so the best of several is max()."""
+    if decision == ReviewDecision.approved:
+        return COUNTS                                    # includes an overridden rejection
+    if c.status == CheckInStatus.confirmed:
+        return COUNTS
+    if c.status == CheckInStatus.flagged and decision is None:
+        return PENDING
+    return NOT_COUNTED
 
 
 def _participant_user_id(db: Session, participant_id: int) -> int:
@@ -129,15 +136,33 @@ def history(db: Session, req: Requirement, tz: str, periods: int = 8,
     """The last `periods` periods, oldest first. Drives the trend chart."""
     now = now or datetime.now(timezone.utc)
     step = timedelta(days=7) if req.period == RequirementPeriod.week else timedelta(days=31)
-    out = []
+    out, seen = [], set()
     for i in range(periods - 1, -1, -1):
         at = now - step * i
-        if req.ends_on and at > req.ends_on:
+        start, end = period_bounds(at, req.period, tz)
+        # Only periods the order actually covers. A week that ended before the
+        # requirement began must never show up as "short" in a report.
+        if end <= req.starts_on or (req.ends_on and start >= req.ends_on) or start in seen:
             continue
-        if at < req.starts_on - step:
-            continue
+        seen.add(start)
         out.append(evaluate(db, req, at, tz))
     return out
+
+
+def streak(periods: list[PeriodResult]) -> int:
+    """
+    Periods met in a row, newest first. The current period only adds to the
+    run once it is met; an unfinished week does not break a streak.
+    """
+    run = 0
+    for i, p in enumerate(reversed(periods)):
+        if p.met:
+            run += 1
+        elif i == 0:
+            continue                                     # this week, still in progress
+        else:
+            break
+    return run
 
 
 def summarize(db: Session, participant: Participant, tz: str,

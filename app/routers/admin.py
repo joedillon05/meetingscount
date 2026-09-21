@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import audit, current_user, require, scope_to_county
+from ..auth import audit, require, scope_to_county
 from ..config import settings
 from ..db import get_db
 from ..models import (
-    AuditLog, CheckIn, CheckInStatus, Meeting, Participant, Review, Role, User,
+    AuditLog, CheckIn, CheckInStatus, Meeting, MeetingSource, Participant, Review, Role, User,
 )
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -21,8 +21,12 @@ STAFF = (Role.officer, Role.admin)
 
 @router.get("/stats")
 def stats(db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
-    checkins = db.scalars(scope_to_county(select(CheckIn), CheckIn, user)).all()
-    meetings = db.scalars(scope_to_county(select(Meeting), Meeting, user)).all()
+    staff_visible = Meeting.source != MeetingSource.personal
+    checkins = db.scalars(scope_to_county(
+        select(CheckIn).join(Meeting, Meeting.id == CheckIn.meeting_id).where(staff_visible),
+        CheckIn, user)).all()
+    meetings = db.scalars(scope_to_county(select(Meeting).where(staff_visible),
+                                          Meeting, user)).all()
     participants = db.scalars(scope_to_county(select(Participant), Participant, user)).all()
     by_status = Counter(c.status.value for c in checkins)
     decided = {r.checkin_id for r in db.scalars(select(Review)).all()}
@@ -90,11 +94,12 @@ def ops_checkins(db: Session = Depends(get_db), user: User = Depends(require(Rol
     job never needs this; they see coordinates one reviewed check-in at a time.
     """
     from ..schemas import checkin_out
-    rows = db.execute(
+    rows = db.execute(scope_to_county(
         select(CheckIn, Meeting, User)
         .join(Meeting, Meeting.id == CheckIn.meeting_id)
         .join(User, User.id == CheckIn.user_id)
-        .order_by(CheckIn.checked_in_at.desc()).limit(500)
+        .where(Meeting.source != MeetingSource.personal)
+        .order_by(CheckIn.checked_in_at.desc()).limit(500), CheckIn, user)
     ).all()
     audit(db, user, "view_ops_map", detail=f"{len(rows)} check-ins with coordinates")
     out = []
@@ -103,13 +108,6 @@ def ops_checkins(db: Session = Depends(get_db), user: User = Depends(require(Rol
         d["participant"] = {"user_id": u.id, "name": u.name}
         out.append(d)
     return out
-
-
-@router.get("/me")
-def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    p = db.scalar(select(Participant).where(Participant.user_id == user.id))
-    return {"id": user.id, "name": user.name, "role": user.role.value,
-            "county_id": user.county_id, "participant_id": p.id if p else None}
 
 
 @router.get("/users")

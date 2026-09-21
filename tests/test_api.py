@@ -60,18 +60,19 @@ def test_checkin_verdict_and_review_flow(client, ids):
         "starts_at": now.isoformat(), "radius_ft": 500, "time_window_min": 60,
     }, headers=as_(ids["officer"])).json()
 
-    # Standing right there, good signal -> confirmed.
-    good = client.post("/api/checkins", json={
-        "meeting_id": m["id"], "lat": 42.2750, "lng": -83.7413, "accuracy_m": 8,
-    }, headers=as_(ids["participant"])).json()
-    assert good["status"] == "confirmed"
-
     # Half a mile away -> rejected, and it is still stored.
     far = client.post("/api/checkins", json={
         "meeting_id": m["id"], "lat": 42.2850, "lng": -83.7413, "accuracy_m": 8,
     }, headers=as_(ids["participant"])).json()
     assert far["status"] == "rejected"
     assert any(r["name"] == "distance" and not r["passed"] for r in far["reasons"])
+
+    # Walks over and tries again: standing right there, good signal -> confirmed.
+    good = client.post("/api/checkins", json={
+        "meeting_id": m["id"], "lat": 42.2750, "lng": -83.7413, "accuracy_m": 8,
+    }, headers=as_(ids["participant"])).json()
+    assert good["status"] == "confirmed"
+    assert good["id"] != far["id"]
 
     # It appears in the queue, an officer decides, and it leaves the queue.
     queue = client.get("/api/reviews/queue", headers=as_(ids["officer"])).json()

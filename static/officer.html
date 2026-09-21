@@ -249,7 +249,11 @@ let qmap, mmap, qLayer, mLayer, mPin = null;
 let scope = 'all', qScope = 'all', statusFilter = '', sortKey = null, sortAsc = true;
 
 /* ---------- dev auth: act as whichever user is picked ---------- */
-function actingId() { try { return localStorage.getItem('mc_act') || ''; } catch (e) { return ''; } }
+// Staff pages keep their own identity key. The participant app uses a
+// different one, so checking in as a participant on the phone page never
+// turns this dashboard into a participant's (and an empty 403) view.
+const ACT_KEY = 'mc_act_staff';
+function actingId() { try { return localStorage.getItem(ACT_KEY) || ''; } catch (e) { return ''; } }
 async function api(path, opts = {}) {
   const h = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (actingId()) h['X-MC-User'] = actingId();
@@ -308,17 +312,18 @@ $('#backToCase').onclick = () => location.hash = 'caseload';
 /* ---------- boot ---------- */
 async function boot() {
   try { users = await api('/api/users'); } catch (e) { users = []; }
+  users = users.filter(u => u.role !== 'participant');
   if (users.length) {
     $('#devBadge').hidden = false;
-    if (!actingId()) {
+    if (!users.some(u => String(u.id) === actingId())) {
       const first = users.find(u => u.role === 'officer') || users[0];
-      try { localStorage.setItem('mc_act', first.id); } catch (e) {}
+      try { localStorage.setItem(ACT_KEY, first.id); } catch (e) {}
     }
     $('#who').innerHTML = users.map(u =>
       `<option value="${u.id}">${esc(u.name)} (${u.role})</option>`).join('');
     $('#who').value = actingId();
     $('#who').onchange = () => {
-      try { localStorage.setItem('mc_act', $('#who').value); } catch (e) {}
+      try { localStorage.setItem(ACT_KEY, $('#who').value); } catch (e) {}
       location.reload();
     };
   } else {

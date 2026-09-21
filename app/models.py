@@ -145,6 +145,10 @@ class User(Base):
     # the security notes in README). Stored plain in dev only.
     phone: Mapped[str | None] = mapped_column(String(32))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # When the participant accepted the consent screen, and which wording they
+    # saw. A new CONSENT_VERSION asks everyone again.
+    consented_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    consent_version: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     participant: Mapped[Participant | None] = relationship(
@@ -248,7 +252,8 @@ class CheckIn(Base):
     distance_ft: Mapped[float] = mapped_column(Float)
     reasons: Mapped[list] = mapped_column(JSON, default=list)
 
-    __table_args__ = (Index("ix_checkins_user_time", "user_id", "checked_in_at"),)
+    __table_args__ = (Index("ix_checkins_user_time", "user_id", "checked_in_at"),
+                      Index("ix_checkins_user_meeting", "user_id", "meeting_id"))
 
     @property
     def needs_review(self) -> bool:

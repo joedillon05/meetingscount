@@ -1,5 +1,5 @@
 """
-Demo data: one county, two programs, two officers, ten participants, three
+Demo data: one county, two programs, two officers, eleven participants, nine
 weeks of meetings and check-ins.
 
 The point is that every state the dashboard can show actually occurs:
@@ -18,7 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete
 
-from .db import SessionLocal, create_all
+from .config import settings
+from .db import SessionLocal, create_all, engine
 from .geo import feet_to_meters
 from .models import (
     AuditLog, Base, CheckIn, CheckInStatus, County, Dispute, Meeting, MeetingCategory,
@@ -57,10 +58,17 @@ PARTICIPANTS = [
     ("Sam Okafor",       1, "stopped"),
     ("Riley Chen",       1, "new"),
     ("Pat Moreau",       1, "sloppy"),
+    ("Jordan Ellis",     0, "first_day"),
 ]
 
 
 def _wipe(db) -> None:
+    if settings.DATABASE_URL.startswith("sqlite"):
+        # Local dev has no migrations, so rebuild the tables outright. That
+        # also picks up any column added since the file was first created.
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+        return
     for model in (AuditLog, Review, Dispute, CheckIn, Requirement, Meeting,
                   Participant, User, Program, County):
         db.execute(delete(model))
@@ -83,8 +91,11 @@ def _checkin(db, m: Meeting, user: User, *, north=0.0, east=0.0, minutes=0.0,
                 accuracy_m=accuracy, checked_in_at=at, ip=ip, user_agent="seed",
                 status=CheckInStatus(v.status), confidence=v.confidence,
                 distance_ft=v.distance_ft, reasons=[r.as_dict() for r in v.results])
-    if checkout and v.status != "rejected":
-        c.checked_out_at = at + timedelta(minutes=m.duration_min - rng.randint(2, 8))
+    out_at = at + timedelta(minutes=m.duration_min - rng.randint(2, 8))
+    # A meeting still running has nobody checked out of it yet, which is what
+    # lets the phone demo show the "you're checked in" card.
+    if checkout and v.status != "rejected" and out_at < datetime.now(timezone.utc):
+        c.checked_out_at = out_at
         c.checkout_lat, c.checkout_lng = _offset(m.lat, m.lng, north * 0.8, east * 0.8)
     db.add(c)
     db.flush()
@@ -156,12 +167,17 @@ def seed(reset: bool = True) -> dict:
         for name, oi, pattern in PARTICIPANTS:
             u = User(county_id=county.id, role=Role.participant, name=name,
                      email=None, phone=f"+1734555{rng.randint(1000, 9999)}")
+            if pattern != "first_day":
+                # Everyone with history has been through the consent screen.
+                u.consented_at = now - timedelta(days=60)
+                u.consent_version = settings.CONSENT_VERSION
             db.add(u)
             db.flush()
             p = Participant(county_id=county.id, program_id=programs[oi % 2].id, user_id=u.id,
                             officer_id=officers[oi].id,
                             case_number=f"26-{rng.randint(1000, 9999)}-FH",
-                            enrolled_on=now - timedelta(days=60 if pattern != "new" else 4))
+                            enrolled_on=now - timedelta(
+                                days={"new": 4, "first_day": 0}.get(pattern, 60)))
             db.add(p)
             db.flush()
             participants.append(p)
@@ -169,7 +185,8 @@ def seed(reset: bool = True) -> dict:
             db.add(Requirement(
                 county_id=county.id, participant_id=p.id, category=MeetingCategory.public,
                 count_required=3, period=RequirementPeriod.week,
-                starts_on=now - timedelta(days=60), ends_on=now + timedelta(days=120),
+                starts_on=now - timedelta(days=0 if pattern == "first_day" else 60),
+                ends_on=now + timedelta(days=120),
                 order_reference=f"ORD-26-{rng.randint(100, 999)}"))
             if pattern in ("compliant", "short"):
                 db.add(Requirement(
@@ -258,20 +275,23 @@ def _behave(db, pattern: str, p: Participant, u: User,
             if m.starts_at < cutoff:
                 _checkin(db, m, u, north=60, east=20, minutes=-5, accuracy=12)
 
+    elif pattern == "first_day":
+        pass                                        # signed up today: consent screen, no history
+
     elif pattern == "new":
         for m in recent[-4:]:
             _checkin(db, m, u, north=30, east=15, minutes=-3, accuracy=9)
 
     elif pattern == "sloppy":
         for i, m in enumerate(recent):
+            if i == len(recent) - 1:                   # the latest from a VPN-looking address
+                _checkin(db, m, u, north=100, east=60, minutes=10,
+                         accuracy=20, ip="185.220.101.7")
+                continue
             _checkin(db, m, u, north=rng.uniform(-150, 150), east=rng.uniform(-150, 150),
                      minutes=rng.uniform(-5, 50),          # often late
                      accuracy=rng.uniform(10, 40),
                      checkout=(i % 3 != 0))                # forgets to check out
-        # one from a VPN-looking address
-        if recent:
-            _checkin(db, recent[-1], u, north=100, east=60, minutes=10,
-                     accuracy=20, ip="185.220.101.7")
 
 
 if __name__ == "__main__":

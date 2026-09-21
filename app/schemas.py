@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import MeetingCategory, MeetingSource, RequirementPeriod, ReviewDecision, Role
 
@@ -66,15 +66,18 @@ class ParticipantIn(BaseModel):
     case_number: Optional[str] = None
 
 
+class ConsentIn(BaseModel):
+    version: str
+
+
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     role: Role
     county_id: Optional[int] = None
     email: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 def checkin_out(c: Any, meeting: Any = None, *, include_pin: bool = False) -> dict:
@@ -98,7 +101,11 @@ def checkin_out(c: Any, meeting: Any = None, *, include_pin: bool = False) -> di
     if meeting is not None:
         d["meeting"] = {"id": meeting.id, "name": meeting.name,
                         "category": meeting.category.value, "source": meeting.source.value,
+                        "address": meeting.address,
                         "lat": meeting.lat, "lng": meeting.lng, "radius_ft": meeting.radius_ft,
                         "starts_at": meeting.starts_at.isoformat(),
+                        "ends_at": meeting.ends_at.isoformat(),
+                        "duration_min": meeting.duration_min,
+                        "time_window_min": meeting.time_window_min,
                         "counts": meeting.counts_toward_requirement}
     return d

@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from ..auth import audit, require, scope_to_county
 from ..db import get_db
-from ..models import CheckIn, CheckInStatus, Dispute, Meeting, Participant, Review, Role, User
+from ..models import (
+    CheckIn, CheckInStatus, Dispute, Meeting, MeetingSource, Participant, Review, Role, User,
+)
 from ..schemas import ReviewIn, checkin_out
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
@@ -25,6 +27,7 @@ def queue(mine_only: bool = False, db: Session = Depends(get_db),
     q = (select(CheckIn, Meeting, User)
          .join(Meeting, Meeting.id == CheckIn.meeting_id)
          .join(User, User.id == CheckIn.user_id)
+         .where(Meeting.source != MeetingSource.personal)
          .where(CheckIn.status.in_([CheckInStatus.flagged, CheckInStatus.rejected]))
          .where(CheckIn.id.not_in(decided))
          .order_by(CheckIn.checked_in_at.asc()))
@@ -60,6 +63,8 @@ def decide(checkin_id: int, body: ReviewIn, request: Request,
     c = db.get(CheckIn, checkin_id)
     if not c or (user.role != Role.superuser and c.county_id != user.county_id):
         raise HTTPException(404, "check-in not found")
+    if db.get(Meeting, c.meeting_id).source == MeetingSource.personal:
+        raise HTTPException(404, "check-in not found")      # never staff business
     if db.scalar(select(Review).where(Review.checkin_id == checkin_id)):
         raise HTTPException(409, "already reviewed")
 

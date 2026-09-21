@@ -3,19 +3,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import audit, client_ip, current_user, require
+from ..auth import audit, client_ip, current_user
 from ..config import settings
 from ..db import get_db
 from ..geo import haversine_m, meters_to_feet
-from ..models import CheckIn, CheckInStatus, Dispute, Meeting, Role, User
+from ..models import (
+    CheckIn, CheckInStatus, Dispute, Meeting, MeetingSource, Review, Role, User,
+)
 from ..schemas import CheckInIn, CheckOutIn, DisputeIn, checkin_out
 from ..verification import CheckInContext, MeetingSpec, verify
 
 router = APIRouter(prefix="/api/checkins", tags=["checkins"])
+
+# Leaving more than this long before the end is written into the record.
+EARLY_CHECKOUT_MIN = 10
 
 
 def _spec(m: Meeting) -> MeetingSpec:
@@ -24,12 +29,46 @@ def _spec(m: Meeting) -> MeetingSpec:
                        time_window_min=m.time_window_min, category=m.category.value)
 
 
+def meeting_visible_to(m: Meeting | None, user: User) -> bool:
+    """
+    Whether `user` may see or check in to `m`. Everyone is kept to their own
+    county, and a personal meeting belongs to the person who created it.
+    """
+    if m is None:
+        return False
+    if user.role == Role.superuser:
+        return True
+    if m.county_id is not None and m.county_id != user.county_id:
+        return False
+    if m.source == MeetingSource.personal:
+        return m.created_by_id == user.id
+    return True
+
+
+def require_consent(user: User) -> None:
+    """A participant cannot check in before they have seen what is collected."""
+    if user.role == Role.participant and user.consent_version != settings.CONSENT_VERSION:
+        raise HTTPException(428, "Please review and accept the consent screen first.")
+
+
 @router.post("", status_code=201)
-def check_in(body: CheckInIn, request: Request,
+def check_in(body: CheckInIn, request: Request, response: Response,
              db: Session = Depends(get_db), user: User = Depends(current_user)):
     m = db.get(Meeting, body.meeting_id)
-    if not m:
+    if not meeting_visible_to(m, user):
         raise HTTPException(404, "meeting not found")
+    require_consent(user)
+
+    # A second tap on a meeting that already has a standing check-in returns
+    # that check-in instead of making a new one. Retrying after a rejection
+    # is allowed: that is someone walking closer or waiting for a better fix.
+    standing = db.scalar(
+        select(CheckIn).where(CheckIn.user_id == user.id, CheckIn.meeting_id == m.id,
+                              CheckIn.status != CheckInStatus.rejected)
+        .order_by(CheckIn.checked_in_at.desc()))
+    if standing is not None:
+        response.status_code = 200
+        return checkin_out(standing, m, include_pin=True) | {"duplicate": True}
 
     at, simulated = datetime.now(timezone.utc), False
     if body.at is not None and settings.DEMO:
@@ -45,7 +84,7 @@ def check_in(body: CheckInIn, request: Request,
     # Every attempt is stored, rejections included. That is the audit trail.
     c = CheckIn(county_id=m.county_id or user.county_id, meeting_id=m.id, user_id=user.id,
                 lat=body.lat, lng=body.lng, accuracy_m=body.accuracy_m, checked_in_at=at,
-                ip=ip, user_agent=("simulator " if simulated else "") + (ctx.user_agent or ""),
+                ip=ip, user_agent=(("simulator " if simulated else "") + (ctx.user_agent or ""))[:300],
                 status=CheckInStatus(v.status), confidence=v.confidence,
                 distance_ft=v.distance_ft, reasons=[r.as_dict() for r in v.results])
     db.add(c)
@@ -57,45 +96,76 @@ def check_in(body: CheckInIn, request: Request,
 def check_out(checkin_id: int, body: CheckOutIn, db: Session = Depends(get_db),
               user: User = Depends(current_user)):
     c = db.get(CheckIn, checkin_id)
-    if not c:
+    if not c or c.user_id != user.id:
         raise HTTPException(404, "check-in not found")
-    if c.user_id != user.id and user.role == Role.participant:
-        raise HTTPException(403, "not your check-in")
+    m = db.get(Meeting, c.meeting_id)
+    if c.status == CheckInStatus.rejected:
+        raise HTTPException(409, "a check-in that was not confirmed has nothing to check out of")
     if c.checked_out_at is None:
-        c.checked_out_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        c.checked_out_at = now
+        extra = []
         # A second location sample makes drive-by check-ins harder.
         if body.lat is not None and body.lng is not None:
             c.checkout_lat, c.checkout_lng = body.lat, body.lng
-            m = db.get(Meeting, c.meeting_id)
             drift = meters_to_feet(haversine_m(body.lat, body.lng, m.lat, m.lng))
-            c.reasons = list(c.reasons) + [{
+            extra.append({
                 "name": "checkout_distance", "passed": drift <= m.radius_ft,
                 "score": 1.0 if drift <= m.radius_ft else 0.0, "weight": 0.0, "hard": False,
                 "reason": f"{drift:.0f} ft from meeting at check-out",
                 "data": {"distance_ft": round(drift, 1)},
-            }]
+            })
+        left_early = (m.ends_at - now).total_seconds() / 60
+        if left_early > EARLY_CHECKOUT_MIN:
+            extra.append({
+                "name": "checkout_time", "passed": False, "score": 0.0, "weight": 0.0,
+                "hard": False,
+                "reason": f"checked out {left_early:.0f} min before the meeting ended",
+                "data": {"minutes_before_end": round(left_early, 1)},
+            })
+        if extra:
+            c.reasons = list(c.reasons) + extra
         db.commit()
-    return checkin_out(c, db.get(Meeting, c.meeting_id), include_pin=True)
+    return checkin_out(c, m, include_pin=True)
 
 
 @router.get("/mine")
 def my_checkins(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """
+    Everything recorded about this person's check-ins, including what their
+    officer decided and why. Principle 4: nothing is hidden from them.
+    """
     rows = db.execute(
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
         .where(CheckIn.user_id == user.id).order_by(CheckIn.checked_in_at.desc())
     ).all()
-    return [checkin_out(c, m, include_pin=True) for c, m in rows]
+    ids = [c.id for c, _ in rows] or [-1]
+    reviews = {r.checkin_id: r for r in db.scalars(select(Review).where(Review.checkin_id.in_(ids)))}
+    notes: dict[int, list] = {}
+    for d in db.scalars(select(Dispute).where(Dispute.checkin_id.in_(ids))
+                        .order_by(Dispute.created_at)):
+        notes.setdefault(d.checkin_id, []).append(
+            {"message": d.message, "created_at": d.created_at.isoformat()})
+
+    out = []
+    for c, m in rows:
+        d = checkin_out(c, m, include_pin=True)
+        rv = reviews.get(c.id)
+        d["review"] = ({"decision": rv.decision.value, "note": rv.note,
+                        "by": rv.reviewer.name, "at": rv.created_at.isoformat()} if rv else None)
+        d["disputes"] = notes.get(c.id, [])
+        out.append(d)
+    return out
 
 
 @router.post("/{checkin_id}/dispute", status_code=201)
 def dispute(checkin_id: int, body: DisputeIn, request: Request,
             db: Session = Depends(get_db), user: User = Depends(current_user)):
     c = db.get(CheckIn, checkin_id)
-    if not c:
+    if not c or c.user_id != user.id:
         raise HTTPException(404, "check-in not found")
-    if c.user_id != user.id:
-        raise HTTPException(403, "not your check-in")
-    d = Dispute(county_id=c.county_id, checkin_id=c.id, user_id=user.id, message=body.message)
+    d = Dispute(county_id=c.county_id, checkin_id=c.id, user_id=user.id,
+                message=body.message.strip())
     db.add(d)
     db.commit()
     audit(db, user, "dispute", target_type="checkin", target_id=c.id, request=request)

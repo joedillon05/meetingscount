@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import create_all
-from .routers import admin, caseload, checkins, meetings, reports, reviews
+from .routers import admin, caseload, checkins, me, meetings, reports, reviews
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
@@ -53,9 +53,25 @@ app = FastAPI(
 )
 
 
-for r in (meetings.router, checkins.router, caseload.router,
+for r in (me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router):
     app.include_router(r)
+
+
+@app.middleware("http")
+async def cache_rules(request, call_next):
+    """
+    API responses carry personal data, so no browser or proxy may keep a copy.
+    Pages and the app's own files are revalidated on every load (a cheap 304
+    when unchanged), so a fix reaches phones on the next open rather than
+    whenever a heuristic cache decides to let go.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    else:
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -77,6 +93,20 @@ def ops():
 def admin_redirect():
     # The old URL from v2. Keep it working.
     return FileResponse(os.path.join(STATIC_DIR, "officer.html"))
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Served from the root so it can control "/", and never cached by the
+    # browser's HTTP cache, or a fix to it could take a day to reach phones.
+    return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest():
+    return FileResponse(os.path.join(STATIC_DIR, "manifest.webmanifest"),
+                        media_type="application/manifest+json")
 
 
 @app.get("/healthz", include_in_schema=False)

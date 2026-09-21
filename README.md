@@ -18,15 +18,17 @@ uvicorn app.main:app --reload
 | URL | Who it's for |
 |---|---|
 | `/officer` | Probation officer: caseload, review queue, participant records, reports |
-| `/` | Participant: check in, see this week's progress, dispute a verdict |
+| `/` | Participant app (installable on a phone): consent, one-tap check-in and check-out, this week's progress, full history with every reason and every officer decision |
 | `/ops` | Developer: map of every check-in, and a simulator that needs no phone |
 | `/docs` | API reference |
 
-Dev auth is on, so there's no login. Pick who you're signed in as from the
-dropdown in the top right. Start at `/officer` as Officer Chen or Ramirez.
+Dev auth is on, so there's no login. On `/officer`, pick a staff member from
+the dropdown in the top right. On `/`, tap the yellow **Demo** chip to switch
+participants. Each page remembers its own person, so being Aisha on the phone
+page never changes who you are on the dashboard.
 
 ```bash
-python -m pytest                    # 25 tests
+python -m pytest                    # 40 tests
 ```
 
 ### With Postgres, the way production runs
@@ -54,6 +56,7 @@ show actually occurs:
 | Devon Hargrove | Consistently late and near the edge of the radius: nothing fails, confidence stays low |
 | Riley Chen | Enrolled four days ago, no history yet |
 | Pat Moreau | Attends, but forgets to check out and once used a VPN |
+| Jordan Ellis | Signed up today: sees the consent screen first, no history yet |
 
 ## How a check-in is judged
 
@@ -90,6 +93,12 @@ period, the system counts check-ins that count:
 - flagged, not yet reviewed → shown separately as pending, not counted
 - rejected, or denied on review → does not count
 
+One meeting counts once. Someone rejected from the parking lot who walks in
+and checks in again gets the better of the two results, not two credits, and a
+second tap on a meeting already checked into returns the same check-in.
+Periods before a requirement began never appear in history, so no report can
+show someone as short for a week their order did not cover.
+
 Weeks run Monday to Sunday in the county's timezone, not UTC, because that is
 how an officer thinks about a week. Meetings a participant created themselves
 never count toward a court requirement, only toward their own tracking.
@@ -106,10 +115,13 @@ app/
   verification.py  the criteria engine
   compliance.py    requirements -> is this person compliant?
   seed.py          the demo county
-  routers/         meetings, checkins, caseload, reviews, reports, admin
+  routers/         me (the signed-in person's own record), meetings, checkins,
+                   caseload, reviews, reports, admin
 static/
   officer.html     the officer dashboard
-  index.html       the participant app
+  index.html       the participant app shell; the app is static/app/
+  app/             participant.js, participant.css, lib.js (shared helpers)
+  sw.js            service worker: caches the app shell, never API responses
   ops.html         map and simulator
 alembic/           migrations, including Postgres row-level security
 infra/             CDK stack for AWS, not deployed yet. See infra/README.md
@@ -134,6 +146,10 @@ code today:
 | Raw pins expire | `POST /api/retention/run` nulls coordinates past `MC_PIN_RETENTION_DAYS`, keeping the verdict |
 | Reports never assert absence | `routers/reports.py`: "could not verify", never "did not attend" |
 | Explainable | every verdict stores its reasons; they appear in the UI and in the report |
+| Consent before the first check-in | `routers/me.py` records who agreed to which wording; `checkins.require_consent` refuses a check-in without it |
+| Personal meetings are the participant's alone | staff lists, the review queue, caseload, reports and the ops map all exclude them |
+| No location to third parties from the phone | the participant result shows a drawn diagram, not map tiles |
+| Personal data never cached | `main.cache_rules`: every `/api/` response is `no-store` |
 
 ### Before real people's data goes in
 

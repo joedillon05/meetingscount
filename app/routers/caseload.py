@@ -13,10 +13,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import compliance
-from ..auth import audit, current_user, require, scope_to_county
+from ..auth import audit, require, scope_to_county
 from ..db import get_db
 from ..models import (
-    CheckIn, CheckInStatus, County, Dispute, Meeting, Participant, Program,
+    CheckIn, CheckInStatus, County, Dispute, Meeting, MeetingSource, Participant, Program,
     Requirement, Review, Role, User,
 )
 from ..schemas import ParticipantIn, RequirementIn, checkin_out
@@ -41,10 +41,14 @@ def caseload(mine_only: bool = False, db: Session = Depends(get_db),
         q = q.where(Participant.officer_id == user.id)
     participants = db.scalars(q).all()
 
-    # Pending reviews per participant, in one query rather than N.
+    # Pending reviews per participant, in one query rather than N. Personal
+    # meetings are the participant's own business and stay out of every
+    # staff view, so they are joined out here too.
     reviewed = select(Review.checkin_id)
     pending_rows = db.execute(
         select(CheckIn.user_id, func.count(CheckIn.id))
+        .join(Meeting, Meeting.id == CheckIn.meeting_id)
+        .where(Meeting.source != MeetingSource.personal)
         .where(CheckIn.status.in_([CheckInStatus.flagged, CheckInStatus.rejected]))
         .where(CheckIn.id.not_in(reviewed))
         .group_by(CheckIn.user_id)
@@ -52,7 +56,10 @@ def caseload(mine_only: bool = False, db: Session = Depends(get_db),
     pending = dict(pending_rows)
 
     last_rows = db.execute(
-        select(CheckIn.user_id, func.max(CheckIn.checked_in_at)).group_by(CheckIn.user_id)
+        select(CheckIn.user_id, func.max(CheckIn.checked_in_at))
+        .join(Meeting, Meeting.id == CheckIn.meeting_id)
+        .where(Meeting.source != MeetingSource.personal)
+        .group_by(CheckIn.user_id)
     ).all()
     last_seen = dict(last_rows)
 
@@ -87,7 +94,8 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
 
     rows = db.execute(
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
-        .where(CheckIn.user_id == p.user_id).order_by(CheckIn.checked_in_at.desc())
+        .where(CheckIn.user_id == p.user_id, Meeting.source != MeetingSource.personal)
+        .order_by(CheckIn.checked_in_at.desc())
     ).all()
     decisions = {r.checkin_id: r for r in db.scalars(
         select(Review).where(Review.checkin_id.in_([c.id for c, _ in rows] or [-1]))).all()}
@@ -177,21 +185,6 @@ def delete_requirement(requirement_id: int, request: Request, db: Session = Depe
     db.commit()
     audit(db, user, "delete_requirement", target_type="requirement",
           target_id=requirement_id, request=request)
-
-
-@router.get("/my/progress")
-def my_progress(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """
-    A participant's own standing. They see everything recorded about them,
-    including the reasons behind every verdict. Principle 4.
-    """
-    p = db.scalar(select(Participant).where(Participant.user_id == user.id))
-    if not p:
-        return {"has_requirements": False, "summary": None}
-    return {"has_requirements": bool(p.requirements),
-            "case_number": p.case_number,
-            "officer": p.officer.name if p.officer else None,
-            "summary": compliance.summarize(db, p, _tz(db, user))}
 
 
 @router.get("/officers")
