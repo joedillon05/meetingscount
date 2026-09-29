@@ -295,4 +295,15 @@ def _behave(db, pattern: str, p: Participant, u: User,
 
 
 if __name__ == "__main__":
+    import sys
+
+    if "--if-empty" in sys.argv:
+        create_all()
+        db = SessionLocal()
+        try:
+            if db.query(County).count():
+                print("database already has data; not seeding")
+                raise SystemExit(0)
+        finally:
+            db.close()
     print(seed())

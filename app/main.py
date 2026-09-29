@@ -18,12 +18,14 @@ The app refuses to start if either is on while MC_ENV=production.
 """
 from __future__ import annotations
 
+import base64
 import os
+import secrets
 
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -56,6 +58,29 @@ app = FastAPI(
 for r in (me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router):
     app.include_router(r)
+
+
+@app.middleware("http")
+async def preview_gate(request, call_next):
+    """
+    A shared password in front of everything except the health check, when
+    MC_ACCESS_PASSWORD is set. For demo deployments only: see the note in
+    config.Settings.ACCESS_PASSWORD.
+    """
+    if not settings.ACCESS_PASSWORD or request.url.path == "/healthz":
+        return await call_next(request)
+    given = ""
+    header = request.headers.get("authorization", "")
+    if header[:6].lower() == "basic ":
+        try:
+            given = base64.b64decode(header[6:]).decode("utf-8", "replace").partition(":")[2]
+        except Exception:                                  # noqa: BLE001  malformed header
+            given = ""
+    if not secrets.compare_digest(given, settings.ACCESS_PASSWORD):
+        return PlainTextResponse(
+            "MeetingsCount preview. Ask Joe for the password.", status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="MeetingsCount preview", charset="UTF-8"'})
+    return await call_next(request)
 
 
 @app.middleware("http")

@@ -1,0 +1,45 @@
+# Preview deployment of MeetingsCount on Fly.io.
+#
+#   fly launch --no-deploy --copy-config --name <your-app-name> --region ord
+#   fly volumes create mc_data --size 1 --region ord --yes
+#   fly secrets set MC_ACCESS_PASSWORD='<a long shared password>'
+#   fly deploy
+#
+# Demo data only. MC_DEV_AUTH is on, which means anyone past the shared
+# password can act as anyone in the system. Real participants need real
+# sign-in first. See DEPLOY.md.
+
+app = "meetingscount-preview"
+primary_region = "ord"            # Chicago, the closest region to Michigan
+
+[build]
+
+[env]
+  MC_DEMO = "1"
+  MC_DEV_AUTH = "1"
+  MC_SEED_ON_BOOT = "1"
+  MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
+  MC_PIN_RETENTION_DAYS = "30"
+
+[http_service]
+  internal_port = 8000
+  force_https = true              # phones only hand out GPS over https
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = "mc_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[checks.health]
+  type = "http"
+  port = 8000
+  path = "/healthz"
+  interval = "30s"
+  timeout = "3s"
+  grace_period = "10s"

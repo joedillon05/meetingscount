@@ -180,6 +180,9 @@ code today:
 | No location to third parties from the phone | the participant result shows a drawn diagram, not map tiles |
 | Personal data never cached | `main.cache_rules`: every `/api/` response is `no-store` |
 
+Deploying: see `DEPLOY.md`. A preview with the demo county behind a shared
+password is ready to go (`fly.toml`); real participants need sign-in first.
+
 ### Before real people's data goes in
 
 - `MC_ENV=production` refuses to boot unless `MC_DEMO=0` and `MC_DEV_AUTH=0`.

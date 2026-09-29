@@ -49,6 +49,13 @@ class Settings:
     # changes in a way people should agree to again.
     CONSENT_VERSION: str = "2026-09"
 
+    # One shared password in front of a preview deployment, so a demo on a
+    # public URL is not a public demo. This is a door lock, not a sign-in:
+    # everyone who gets through is still whoever the role switcher says they
+    # are. Never a substitute for real accounts, and never in front of real
+    # participant data.
+    ACCESS_PASSWORD: str = os.environ.get("MC_ACCESS_PASSWORD", "")
+
     @property
     def is_postgres(self) -> bool:
         return self.DATABASE_URL.startswith("postgresql")
