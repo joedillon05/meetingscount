@@ -55,17 +55,53 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+IS_PRODUCTION = os.environ.get("MC_ENV") == "production"
+
 app = FastAPI(
     title="MeetingsCount",
-    version="0.3.0",
+    version="0.4.0",
     description="Verifiable attendance for court-ordered meetings.",
     lifespan=lifespan,
+    # The interactive API browser is a development tool. In production it is
+    # one more thing to keep an eye on, for no benefit to anyone using this.
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
+
+# Everything the pages need, and nothing else. Scripts and styles come from
+# this origin only, so an injected <script src> has nowhere to load from.
+# Map tiles are the one outside source, and only images.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'; "
+       "font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+       "form-action 'self'")
 
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router):
     app.include_router(r)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """
+    The headers a county security review looks for. Set here rather than at
+    the load balancer, so they hold wherever this runs.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(self), camera=(), microphone=(), payment=()")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security",
+                                    "max-age=31536000; includeSubDomains")
+    # The API browser loads its own assets from a CDN, so it keeps out of this.
+    if not request.url.path.startswith(("/api/", "/docs", "/redoc", "/openapi")):
+        response.headers.setdefault("Content-Security-Policy", CSP)
+    return response
 
 
 @app.middleware("http")
