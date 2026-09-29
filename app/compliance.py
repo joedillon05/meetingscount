@@ -55,6 +55,11 @@ class PeriodResult:
     counted: int
     pending: int
     not_counted: int
+    # True when the order only covered part of this period: it began midweek,
+    # or ended midweek. Judging someone short for a week they were under the
+    # order for two days of would be wrong, so reports leave these out of the
+    # tally and say so.
+    partial: bool = False
 
     @property
     def met(self) -> bool:
@@ -76,7 +81,7 @@ class PeriodResult:
         return {
             "starts": self.starts.isoformat(), "ends": self.ends.isoformat(),
             "required": self.required, "counted": self.counted, "pending": self.pending,
-            "not_counted": self.not_counted, "status": self.status,
+            "not_counted": self.not_counted, "status": self.status, "partial": self.partial,
         }
 
 
@@ -149,7 +154,9 @@ def history(db: Session, req: Requirement, tz: str, periods: int = 8,
         if end <= req.starts_on or (req.ends_on and start >= req.ends_on) or start in seen:
             continue
         seen.add(start)
-        out.append(evaluate(db, req, at, tz))
+        result = evaluate(db, req, at, tz)
+        result.partial = start < req.starts_on or bool(req.ends_on and end > req.ends_on)
+        out.append(result)
     return out
 
 

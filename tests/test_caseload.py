@@ -148,3 +148,19 @@ def test_staff_from_another_county_cannot_enrol_into_this_one(client, ids):
 def test_a_participant_cannot_enrol_anyone(client, ids):
     assert client.post("/api/participants", json={"name": "Me Again", "phone": "+17345557777"},
                        headers=as_(ids["participant"])).status_code == 403
+
+
+def test_a_part_week_is_never_reported_as_short(client, ids):
+    """An order that starts on a Thursday does not make that week a failure."""
+    made = _add(client, ids["officer"], name="Midweek Start").json()
+    monday = NOW - timedelta(days=NOW.weekday())
+    client.post("/api/requirements", json={
+        "participant_id": made["participant_id"], "category": "public", "count_required": 3,
+        "period": "week", "starts_on": (monday + timedelta(days=3)).isoformat(),
+    }, headers=as_(ids["officer"]))
+    report = client.get(f"/api/reports/participant/{made['participant_id']}?days=30",
+                        headers=as_(ids["officer"])).json()
+    req = report["requirements"][0]
+    assert req["partial_periods"] == 1
+    assert req["periods_covered"] == 0, "the only week so far is a part week"
+    assert req["history"][0]["partial"] is True

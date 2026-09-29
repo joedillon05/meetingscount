@@ -527,20 +527,29 @@ async function accessCode(pid, name) {
   </div>`, { label: 'Sign-in code' });
 }
 
-async function openReport(pid, name) {
-  let d;
-  try { d = await api(`/api/reports/participant/${pid}?days=90`); } catch (e) { toast(e.message); return; }
-  const sh = sheet(`<div class="step left report">
+function openReport(pid, name) {
+  const sh = sheet(`<div class="step left">
     <h2>Compliance report</h2>
-    <p class="muted">${esc(name)} · last 90 days · generated ${esc(dateTime(d.generated_at))}</p>
-    <div class="reqs big">${d.summary.requirements.map(progress).join('') || '<p class="muted small">No active requirement.</p>'}</div>
-    <p class="callout">${icon('shield')} ${esc(d.note)}</p>
-    <p class="small muted">Verification hash <code>${esc(d.content_hash.slice(0, 16))}</code>. A printed copy can be checked against the record with this.</p>
-    <details><summary>Everything in the report</summary><pre class="json">${esc(JSON.stringify(d, null, 2))}</pre></details>
-    <button class="btn block" data-csv type="button">${icon('download')} Download CSV</button>
-  </div>`, { label: 'Compliance report', wide: true });
+    <p class="muted">For ${esc(name)}. The printable version is the one to put in a file: it explains
+      itself to someone who has never seen this system, and it carries a fingerprint so a copy can be checked.</p>
+    <label>Period<select id="repDays">
+      <option value="30">Last 30 days</option>
+      <option value="60">Last 60 days</option>
+      <option value="90" selected>Last 90 days</option>
+      <option value="180">Last 180 days</option>
+      <option value="365">Last year</option>
+    </select></label>
+    <button class="btn block" data-open type="button">${icon('file')} Open printable report</button>
+    <button class="btn block secondary" data-csv type="button">${icon('download')} Download the check-ins as a spreadsheet</button>
+  </div>`, { label: 'Compliance report' });
+  const days = () => sh.body.querySelector('#repDays').value;
+  sh.body.querySelector('[data-open]').onclick = () => {
+    window.open(`/report?participant=${pid}&days=${days()}`, '_blank', 'noopener');
+    sh.close();
+  };
   sh.body.querySelector('[data-csv]').onclick = () =>
-    download(`/api/reports/participant/${pid}.csv?days=90`, `report-${pid}.csv`).catch(e => toast(e.message));
+    download(`/api/reports/participant/${pid}.csv?days=${days()}`, `report-${pid}.csv`)
+      .catch(e => toast(e.message));
 }
 
 /* ---------- meetings ---------- */

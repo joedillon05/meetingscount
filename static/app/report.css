@@ -1,0 +1,58 @@
+/* The attendance report. On screen it is a document on a desk; on paper it is
+   a clean black-on-white court exhibit with repeating table headers. */
+
+.report-body { background: var(--surface-2); color: var(--ink); }
+.loading { padding: 40px; text-align: center; color: var(--muted); }
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+  background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+.spacer { flex: 1; }
+.sheetlike { max-width: 700px; margin: 60px auto; background: var(--surface); padding: 30px; border-radius: 14px; }
+
+.sheet-page { max-width: 8.5in; margin: 22px auto 60px; background: #fff; color: #14171c;
+  padding: 0.7in 0.75in; box-shadow: 0 2px 18px rgba(16, 24, 40, .12); }
+.sheet-page section { margin-top: 26px; }
+.sheet-page h1 { font-size: 25px; letter-spacing: -.02em; }
+.sheet-page h2 { font-size: 15.5px; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #14171c; }
+.sheet-page p { margin-bottom: 8px; }
+.rep-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
+  border-bottom: 2px solid #14171c; padding-bottom: 12px; }
+.rep-head .muted { color: #5b6270; }
+.rep-brand { display: flex; align-items: center; gap: 8px; font-weight: 750; }
+.rep-brand .logo { width: 24px; height: 24px; }
+
+.rep-who dl { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 30px; margin: 14px 0 0; }
+.rep-who div { display: grid; grid-template-columns: 150px 1fr; gap: 10px; }
+.rep-who dt { color: #5b6270; font-size: 13.5px; }
+.rep-who dd { margin: 0; font-weight: 600; font-size: 13.5px; }
+.rep-order { font-size: 15px; }
+.rep-summary { background: #f3f4f6; border-left: 3px solid #14171c; padding: 9px 12px; font-size: 14.5px; }
+
+.rep-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+.rep-table th { text-align: left; font-size: 11.5px; text-transform: none; font-weight: 700;
+  border-bottom: 1.5px solid #14171c; padding: 6px 8px; }
+.rep-table td { padding: 6px 8px; border-bottom: 1px solid #e2e5ea; vertical-align: top; }
+.rep-table .muted { color: #5b6270; font-weight: 400; }
+.rep-table .nowrap { white-space: nowrap; }
+.rep-review { color: #5b6270; font-size: 12px; margin-top: 2px; }
+.rep-table tr.partial td { color: #5b6270; }
+.fine { font-size: 12.5px; color: #5b6270; margin-top: 6px; }
+.s-met, .s-ok { color: #11703a; font-weight: 650; }
+.s-short, .s-bad { color: #ae2418; font-weight: 650; }
+.s-pending, .s-warn { color: #875600; font-weight: 650; }
+
+.rep-note ul { margin: 8px 0 0 18px; padding: 0; font-size: 13.5px; }
+.rep-note li { margin-bottom: 5px; }
+.rep-foot { margin-top: 28px; border-top: 1px solid #c8ccd4; padding-top: 12px; font-size: 13px; }
+.hash { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;
+  background: #f3f4f6; padding: 8px 10px; border-radius: 6px; }
+
+@media print {
+  @page { margin: 0.6in; }
+  .report-body { background: #fff; }
+  .no-print { display: none !important; }
+  .sheet-page { box-shadow: none; margin: 0; padding: 0; max-width: none; }
+  /* Repeat the header on every page, and never split a row across pages. */
+  thead { display: table-header-group; }
+  tr, section, .rep-summary { break-inside: avoid; }
+  a { text-decoration: none; color: inherit; }
+}

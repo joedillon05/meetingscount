@@ -20,14 +20,21 @@ from sqlalchemy.orm import Session
 from .. import compliance
 from ..auth import audit, require
 from ..db import get_db
-from ..models import CheckIn, County, Meeting, MeetingSource, Participant, Role, User
-from ..reviewing import latest_decisions
+from ..models import CheckIn, County, Meeting, MeetingSource, Participant, Program, Role, User
+from ..reviewing import states_for
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 STAFF = (Role.officer, Role.admin)
 
 
-def _build(db: Session, p: Participant, tz: str, days: int) -> dict:
+OUTCOME = {compliance.COUNTS: "counted", compliance.PENDING: "pending",
+           compliance.NOT_COUNTED: "not counted"}
+
+DECISION_WORDS = {"approved": "counted after review", "denied": "not counted after review",
+                  "more_info": "officer asked the participant for more information"}
+
+
+def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None = None) -> dict:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = db.execute(
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
@@ -35,32 +42,60 @@ def _build(db: Session, p: Participant, tz: str, days: int) -> dict:
                Meeting.source != MeetingSource.personal)
         .order_by(CheckIn.checked_in_at.asc())
     ).all()
-    decisions = {k: v.value for k, v in latest_decisions(db, [c.id for c, _ in rows]).items()}
+    states = states_for(db, [c for c, _ in rows])
 
     lines = []
     for c, m in rows:
+        st = states[c.id]
+        review = st.latest
         lines.append({
             "date": c.checked_in_at.astimezone(timezone.utc).isoformat(),
-            "meeting": m.name, "category": m.category.value,
+            "meeting": m.name, "address": m.address, "category": m.category.value,
             "counts_toward_requirement": m.counts_toward_requirement,
             "result": c.status.value, "confidence": c.confidence,
             "distance_ft": round(c.distance_ft, 1),
             "checked_out": c.checked_out_at is not None,
-            "review": decisions.get(c.id),
+            "checked_out_at": c.checked_out_at.isoformat() if c.checked_out_at else None,
+            "review": review.decision.value if review else None,
+            "reviewed_by": review.reviewer.name if review and review.reviewer else None,
+            "reviewed_at": review.created_at.isoformat() if review else None,
+            "review_note": review.note if review else None,
+            "review_words": DECISION_WORDS.get(review.decision.value) if review else None,
+            # What this check-in did for the requirement, in one word.
+            "outcome": OUTCOME[compliance.outcome(c, review.decision if review else None)],
+        })
+
+    county = db.get(County, p.county_id)
+    program = db.get(Program, p.program_id) if p.program_id else None
+    requirements = []
+    for r in p.requirements:
+        history = [h.as_dict() for h in compliance.history(db, r, tz, periods=max(2, days // 7))]
+        full = [h for h in history if not h["partial"]]
+        met = sum(1 for h in full if h["status"] == "met")
+        requirements.append({
+            "category": r.category.value if r.category else "any",
+            "count_required": r.count_required, "period": r.period.value,
+            "order_reference": r.order_reference,
+            "starts_on": r.starts_on.isoformat(),
+            "ends_on": r.ends_on.isoformat() if r.ends_on else None,
+            "history": history,
+            "periods_met": met, "periods_covered": len(full),
+            "partial_periods": len(history) - len(full),
         })
 
     body = {
         "participant": p.user.name, "case_number": p.case_number,
+        "county": county.name if county else None,
+        "timezone": tz,
+        "program": program.name if program else None,
+        "officer": p.officer.name if p.officer else None,
+        "enrolled_on": p.enrolled_on.isoformat(),
         "period_days": days,
+        "period_from": since.isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": by.name if by else None,
         "summary": compliance.summarize(db, p, tz),
-        "requirements": [
-            {"category": r.category.value if r.category else "any",
-             "count_required": r.count_required, "period": r.period.value,
-             "order_reference": r.order_reference,
-             "history": [h.as_dict() for h in compliance.history(db, r, tz, periods=12)]}
-            for r in p.requirements
-        ],
+        "requirements": requirements,
         "check_ins": lines,
         "note": ("MeetingsCount reports confirmed attendance only. An entry that is not "
                  "confirmed means this system could not verify it, which is not by itself "
@@ -78,7 +113,7 @@ def participant_report(participant_id: int, request: Request, days: int = 90,
     if not p or (user.role != Role.superuser and p.county_id != user.county_id):
         raise HTTPException(404, "participant not found")
     tz = (db.get(County, user.county_id).timezone if user.county_id else "America/Detroit")
-    report = _build(db, p, tz, days)
+    report = _build(db, p, tz, days, by=user)
     audit(db, user, "export_report", target_type="participant", target_id=p.id,
           detail=f"{days}d hash={report['content_hash'][:12]}", request=request)
     return report

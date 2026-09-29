@@ -128,6 +128,12 @@ def admin_redirect():
     return FileResponse(os.path.join(STATIC_DIR, "officer.html"))
 
 
+@app.get("/report", include_in_schema=False)
+def report_page():
+    """The printable attendance report. Takes ?participant=<id>&days=<n>."""
+    return FileResponse(os.path.join(STATIC_DIR, "report.html"))
+
+
 @app.get("/sw.js", include_in_schema=False)
 def service_worker():
     # Served from the root so it can control "/", and never cached by the
