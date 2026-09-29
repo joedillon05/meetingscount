@@ -88,6 +88,16 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+# No 0/O/1/l/I, because these get read out loud and typed wrong.
+TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def temp_password(groups: int = 4, size: int = 4) -> str:
+    """A first password to hand over, in blocks: MKD4-P7RT-9WQX-HF2N."""
+    return "-".join("".join(secrets.choice(TEMP_ALPHABET) for _ in range(size))
+                    for _ in range(groups))
+
+
 def new_login_code() -> str:
     """Six digits. Short enough to read down a phone line, and rate limited."""
     return f"{secrets.randbelow(1_000_000):06d}"

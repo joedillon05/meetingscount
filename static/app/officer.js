@@ -51,6 +51,7 @@ async function boot() {
 
   try { S.me = await api('/api/me'); } catch (e) { return e.status === 401 ? signIn() : fatal(e); }
   if (S.me.role === 'participant') return participantHere();
+  if (S.me.must_change_password) return firstPassword();
   setTimeZone(S.me.timezone);
   renderShell();
   window.addEventListener('hashchange', route);
@@ -74,7 +75,8 @@ function renderShell() {
         <a data-nav="caseload" href="#caseload">${icon('users')}<span>Caseload</span></a>
         <a data-nav="queue" href="#queue">${icon('inbox')}<span>Review queue</span><span class="count" id="qcount" hidden></span></a>
         <a data-nav="meetings" href="#meetings">${icon('calendar')}<span>Meetings</span></a>
-        ${admin ? `<a data-nav="audit" href="#audit">${icon('scroll')}<span>Audit log</span></a>` : ''}
+        ${admin ? `<a data-nav="staff" href="#staff">${icon('users')}<span>Staff</span></a>
+        <a data-nav="audit" href="#audit">${icon('scroll')}<span>Audit log</span></a>` : ''}
       </nav>
       <span class="spacer"></span>
       ${S.staff ? `<a class="navlink" href="/ops">Ops</a><a class="navlink" href="/">Phone app</a>
@@ -104,6 +106,7 @@ function route() {
   if (view === 'queue') return mountQueue(ctx, v, { tab: a || 'open', id: b ? Number(b) : null });
   if (view === 'participant') return viewParticipant(Number(a));
   if (view === 'meetings') return viewMeetings();
+  if (view === 'staff') return viewStaff();
   if (view === 'audit') return viewAudit();
   return viewCaseload();
 }
@@ -652,6 +655,146 @@ function deleteMeeting(id, name) {
   sh.body.querySelector('[data-yes]').onclick = async () => {
     try { await api(`/api/meetings/${id}`, { method: 'DELETE' }); sh.close(); toast('Meeting deleted.'); viewMeetings(); }
     catch (err) { sh.close(); toast(err.message); }
+  };
+}
+
+/* ---------- staff ---------- */
+
+function firstPassword() {
+  app.innerHTML = `<main class="signin-page">
+    <form class="card signin-card" id="firstPw" novalidate>
+      <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+      <h1>Choose your own password</h1>
+      <p class="muted">You signed in with a password somebody else picked and read out to you.
+        Choose one only you know before going any further. At least 12 characters.</p>
+      <label>The password you were given<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>Your new password<input name="new_password" type="password" autocomplete="new-password" required></label>
+      <p class="err" role="alert" hidden></p>
+      <button class="btn block" type="submit">Save and continue</button>
+      <button class="btn block ghost" data-out type="button">Sign out</button>
+    </form>
+  </main>`;
+  const form = $('#firstPw');
+  form.current_password.focus();
+  form.querySelector('[data-out]').onclick = signOut;
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('/api/auth/password', { method: 'POST', body: JSON.stringify({
+        current_password: form.current_password.value, new_password: form.new_password.value }) });
+      location.reload();
+    } catch (err) {
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+}
+
+async function viewStaff() {
+  const v = $('#view');
+  if (!['admin', 'superuser'].includes(S.me.role)) { location.hash = 'caseload'; return; }
+  loading(v);
+  let rows;
+  try { rows = await api('/api/staff'); } catch (e) { return failed(v, e); }
+  v.innerHTML = `
+    <div class="page-head"><div><h1>Staff</h1>
+      <p class="muted">Who can sign in to ${esc(S.me.county || 'this county')}. Adding someone gives you a
+        first password to read out; they choose their own before the dashboard will do anything.</p></div>
+      <button class="btn" data-add type="button">${icon('plus')} Add staff member</button></div>
+    <section class="card flush">
+      <div class="table-wrap"><table class="grid">
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Second factor</th><th>Caseload</th><th>Last sign-in</th><th></th></tr></thead>
+        <tbody>${rows.map(u => `<tr class="${u.active ? '' : 'off'}">
+          <td><b>${esc(u.name)}</b>${u.is_you ? '<span class="muted small"> you</span>' : ''}
+            ${u.active ? '' : '<div class="muted small">account turned off</div>'}
+            ${u.must_change_password ? '<div class="muted small">has not chosen a password yet</div>' : ''}</td>
+          <td class="muted">${esc(u.email || '')}</td>
+          <td>${u.role === 'admin' ? 'County admin' : 'Officer'}</td>
+          <td>${u.mfa ? `<span class="badge tone-ok sm">${icon('check')} On</span>`
+            : `<span class="badge tone-warn sm">${icon('alert')} Off</span>`}</td>
+          <td>${u.participants || ''}</td>
+          <td class="muted">${u.last_login_at ? esc(ago(u.last_login_at)) : 'never'}</td>
+          <td class="right"><button class="btn ghost sm-btn" data-manage="${u.id}" type="button">Manage</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </section>
+    <p class="fine">A second factor is an authenticator app. Each person turns it on for themselves from their
+      account menu. County IT usually asks for it on every staff account.</p>`;
+  v.querySelector('[data-add]').onclick = addStaffSheet;
+  v.querySelectorAll('[data-manage]').forEach(b => b.onclick = () =>
+    manageStaffSheet(rows.find(u => u.id === Number(b.dataset.manage))));
+}
+
+function addStaffSheet() {
+  const sh = sheet(`<form class="step left" id="staffForm">
+    <h2>Add a staff member</h2>
+    <p class="muted">They sign in with their email and the password you hand over, then choose their own.</p>
+    <label>Name<input name="name" required maxlength="120" placeholder="Officer Vance"></label>
+    <label>Work email<input name="email" type="email" required maxlength="200" placeholder="vance@washtenaw.gov"></label>
+    <label>Role<select name="role">
+      <option value="officer">Officer: their caseload and the review queue</option>
+      <option value="admin">County admin: also staff, audit log and settings</option>
+    </select></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Create the account</button>
+  </form>`, { label: 'Add a staff member' });
+  const form = sh.body.querySelector('#staffForm');
+  form.name.focus();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const made = await api('/api/staff', { method: 'POST',
+        body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+      sh.set(`<div class="step">
+        <div class="hero-ic tone-ok">${icon('check')}</div>
+        <h2>${esc(made.name)} can sign in</h2>
+        <p class="muted">Read this password out. They will choose their own the first time they sign in.</p>
+        <p class="bigcode small-code">${esc(made.first_password)}</p>
+        <p class="fine">It is not stored anywhere you can read it again. If it is lost, reset it from this screen.</p>
+        <button class="btn block" data-close type="button">Done</button>
+      </div>`);
+      viewStaff();
+    } catch (err) {
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+}
+
+function manageStaffSheet(u) {
+  const sh = sheet(`<div class="step left">
+    <h2>${esc(u.name)}</h2>
+    <p class="muted">${esc(u.email || '')} · ${u.role === 'admin' ? 'County admin' : 'Officer'}${
+      u.participants ? ` · ${plural(u.participants, 'participant')}` : ''}</p>
+    <div class="acct-rows">
+      <button class="link-row" data-a="reset" type="button">${icon('refresh')}
+        <span><b>Reset their password</b><br><span class="muted small">Signs them out and gives you a new one to read out</span></span></button>
+      ${u.is_you ? '' : `<button class="link-row" data-a="role" type="button">${icon('users')}
+        <span><b>Make them ${u.role === 'admin' ? 'an officer' : 'a county admin'}</b><br>
+        <span class="muted small">${u.role === 'admin' ? 'Removes access to staff, audit and settings' : 'Adds staff, audit log and settings'}</span></span></button>`}
+      ${u.is_you ? '' : `<button class="link-row" data-a="toggle" type="button">${icon('back')}
+        <span><b>${u.active ? 'Turn off this account' : 'Turn the account back on'}</b><br>
+        <span class="muted small">${u.active ? 'Signs them out. Their decisions stay in the record' : 'They can sign in again'}</span></span></button>`}
+    </div>
+  </div>`, { label: 'Manage staff member' });
+  sh.body.onclick = async e => {
+    const b = e.target.closest('[data-a]');
+    if (!b) return;
+    try {
+      if (b.dataset.a === 'reset') {
+        const r = await api(`/api/staff/${u.id}/reset-password`, { method: 'POST' });
+        sh.set(`<div class="step"><h2>New password for ${esc(r.name)}</h2>
+          <p class="muted">They are signed out. Read this out; they will choose their own.</p>
+          <p class="bigcode small-code">${esc(r.first_password)}</p>
+          <button class="btn block" data-close type="button">Done</button></div>`);
+      } else if (b.dataset.a === 'role') {
+        await api(`/api/staff/${u.id}`, { method: 'PATCH',
+          body: JSON.stringify({ role: u.role === 'admin' ? 'officer' : 'admin' }) });
+        sh.close(); toast('Role changed.');
+      } else {
+        await api(`/api/staff/${u.id}`, { method: 'PATCH', body: JSON.stringify({ active: !u.active }) });
+        sh.close(); toast(u.active ? 'Account turned off.' : 'Account turned back on.');
+      }
+      viewStaff();
+    } catch (err) { toast(err.message); }
   };
 }
 

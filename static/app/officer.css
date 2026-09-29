@@ -314,3 +314,6 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var
   text-align: center; user-select: all; }
 .danger-link { color: var(--bad); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.bigcode.small-code { font-size: 26px; letter-spacing: .06em; }
+.grid tr.off td { opacity: .6; }
+td.right { text-align: right; }

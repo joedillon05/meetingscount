@@ -332,3 +332,78 @@ def test_password_policy_rejects_the_obvious():
     assert security.password_problem("password1234")
     assert security.password_problem("me@example.gov", email="me@example.gov")
     assert security.password_problem(GOOD) is None
+
+
+# --------------------------------------------------------------------------- #
+# Staff accounts
+# --------------------------------------------------------------------------- #
+
+def test_an_admin_adds_an_officer_who_must_pick_their_own_password(client, ids, real_auth):
+    _sign_out(client)
+    _sign_in(client, email="admin@example.gov")
+    made = client.post("/api/staff", json={"name": "Officer Vance", "email": "vance@example.gov",
+                                           "role": "officer"})
+    assert made.status_code == 201
+    first = made.json()["first_password"]
+    assert len(first) >= 12 and first.count("-") == 3
+    _sign_out(client)
+
+    signed = _sign_in(client, email="vance@example.gov", password=first)
+    assert signed.status_code == 200 and signed.json()["must_change_password"] is True
+    blocked = client.get("/api/caseload")
+    assert blocked.status_code == 403 and "own password" in blocked.json()["detail"]
+
+    client.post("/api/auth/password", json={"current_password": first, "new_password": GOOD})
+    assert client.get("/api/caseload").status_code == 200
+    _sign_out(client)
+
+
+def test_two_staff_cannot_share_an_email(client, ids, real_auth):
+    _sign_out(client)
+    _sign_in(client, email="admin@example.gov")
+    again = client.post("/api/staff", json={"name": "Someone Else", "email": "chen@example.gov"})
+    assert again.status_code == 409
+    _sign_out(client)
+
+
+def test_resetting_a_password_signs_that_person_out(client, ids, real_auth):
+    _sign_out(client)
+    _sign_in(client, email="admin@example.gov")
+    staff = client.get("/api/staff").json()
+    chen = next(s for s in staff if s["email"] == "chen@example.gov")
+    r = client.post(f"/api/staff/{chen['id']}/reset-password")
+    assert r.status_code == 200 and r.json()["first_password"]
+    assert _open_sessions(chen["id"]) == 0
+    _sign_out(client)
+
+    # And the old password no longer works.
+    assert _sign_in(client).status_code == 401
+    # Put the demo account back the way the seed left it.
+    db = SessionLocal()
+    try:
+        from app.security import hash_password
+        u = db.get(User, chen["id"])
+        u.password_hash = hash_password(DEMO_PASSWORD)
+        u.must_change_password = False
+        u.failed_logins = 0
+        u.locked_until = None
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_an_admin_cannot_switch_off_their_own_account(client, ids, real_auth):
+    _sign_out(client)
+    _sign_in(client, email="admin@example.gov")
+    me = client.get("/api/me").json()["id"]
+    r = client.patch(f"/api/staff/{me}", json={"active": False})
+    assert r.status_code == 409
+    _sign_out(client)
+
+
+def test_officers_cannot_manage_staff(client, ids, real_auth):
+    _sign_out(client)
+    _sign_in(client)                                   # an officer
+    assert client.get("/api/staff").status_code == 403
+    assert client.post("/api/staff", json={"name": "No", "email": "no@example.gov"}).status_code == 403
+    _sign_out(client)

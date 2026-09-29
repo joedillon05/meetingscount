@@ -46,6 +46,8 @@ def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return {
         "id": user.id, "name": user.name, "role": user.role.value,
         "county_id": user.county_id, "participant_id": p.id if p else None,
+        "must_change_password": user.must_change_password,
+        "mfa": bool(user.totp_enabled_at),
         "county": county.name if county else None,
         "timezone": county.timezone if county else "America/Detroit",
         "program": program.name if program else None,

@@ -93,6 +93,18 @@ class RequirementPatch(BaseModel):
     order_reference: Optional[str] = Field(default=None, max_length=120)
 
 
+class StaffIn(BaseModel):
+    name: str = Field(max_length=120)
+    email: str = Field(max_length=200)
+    role: Role = Role.officer
+
+
+class StaffPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+    role: Optional[Role] = None
+    active: Optional[bool] = None
+
+
 class ConsentIn(BaseModel):
     version: str
 

@@ -171,6 +171,9 @@ def require(*roles: Role) -> Callable:
     def dep(user: User = Depends(current_user)) -> User:
         if roles and user.role not in roles and user.role != Role.superuser:
             raise HTTPException(403, f"needs role {' or '.join(r.value for r in roles)}")
+        if user.must_change_password:
+            # A password somebody else chose and read out is not a password.
+            raise HTTPException(403, "Choose your own password before continuing.")
         return user
     return dep
 
