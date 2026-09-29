@@ -312,3 +312,5 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var
 .bigcode { font: 800 46px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em;
   background: var(--brand-tint); color: var(--brand); border-radius: 14px; padding: 18px 10px;
   text-align: center; user-select: all; }
+.danger-link { color: var(--bad); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

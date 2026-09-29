@@ -18,6 +18,7 @@ const app = $('#app');
 const S = {
   ctx: {}, me: null, staff: null, view: null, cases: [], stats: {},
   scope: 'all', status: '', search: '', sortKey: null, sortAsc: true, mmap: null, pin: null,
+  pickers: null,
 };
 
 const OVERALL = {
@@ -140,7 +141,8 @@ async function viewCaseload() {
   };
   v.innerHTML = `
     <div class="page-head"><div><h1>Caseload</h1>
-      <p class="muted">${esc(S.me.county || '')}${S.me.county ? ' · ' : ''}week of ${esc(monthDay(mondayOf(new Date())))}</p></div></div>
+      <p class="muted">${esc(S.me.county || '')}${S.me.county ? ' · ' : ''}week of ${esc(monthDay(mondayOf(new Date())))}</p></div>
+      <button class="btn" data-enrol type="button">${icon('plus')} Add participant</button></div>
     <div class="tiles">
       ${tile(st.participants, 'participants')}
       ${tile(cs.filter(c => c.overall === 'met').length, 'on track this week', 'ok')}
@@ -178,6 +180,7 @@ async function viewCaseload() {
     S.sortAsc = S.sortKey === th.dataset.k ? !S.sortAsc : true;
     S.sortKey = th.dataset.k; renderCases();
   });
+  v.querySelector('[data-enrol]').onclick = enrolSheet;
   $('#crows').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) location.hash = `participant/${tr.dataset.id}`; };
   $('#crows').onkeydown = e => { const tr = e.target.closest('tr[data-id]'); if (tr && e.key === 'Enter') location.hash = `participant/${tr.dataset.id}`; };
 }
@@ -242,18 +245,30 @@ async function viewParticipant(id) {
         <p class="muted">${[d.case_number && `Case ${esc(d.case_number)}`, d.officer && esc(d.officer),
           `enrolled ${esc(shortDay(d.enrolled_on))}`].filter(Boolean).join(' · ')}</p></div>
       ${pill(s.overall)}
+      <button class="btn secondary" data-edit type="button">${icon('note')} Edit</button>
       <button class="btn secondary" data-code type="button">${icon('keyboard')} Sign-in code</button>
       <button class="btn secondary" data-report type="button">${icon('file')} Compliance report</button>
     </section>
 
     <section class="card">
-      <h2 class="h2">Requirements</h2>
+      <div class="row between"><h2 class="h2 flush">Requirements</h2>
+        <button class="btn secondary sm-btn" data-addreq type="button">${icon('plus')} Add requirement</button></div>
       ${d.requirements.length ? d.requirements.map(r => `
         <div class="req-block">
           <div class="row wrap"><b>${r.count_required} ${esc(REQ_NOUN[r.category] || r.category)} a ${esc(r.period)}</b>
-            <span class="muted small">${[r.order_reference, `from ${shortDay(r.starts_on)}`, r.ends_on && `to ${shortDay(r.ends_on)}`].filter(Boolean).map(esc).join(' · ')}</span></div>
+            <span class="muted small">${[r.order_reference, `from ${shortDay(r.starts_on)}`, r.ends_on && `to ${shortDay(r.ends_on)}`].filter(Boolean).map(esc).join(' · ')}</span>
+            <span class="spacer"></span>
+            <button class="linkish small" data-editreq="${r.id}" type="button">Amend</button>
+            <button class="linkish small danger-link" data-delreq="${r.id}" type="button">Remove</button></div>
           <div class="chart">${trendChart(r)}</div>
-        </div>`).join('') : '<p class="muted small">No active requirement on file.</p>'}
+        </div>`).join('') : '<p class="muted small">No requirement on file. Add what the order says.</p>'}
+    </section>
+
+    <section class="card">
+      <div class="row between"><h2 class="h2 flush">Notes</h2>
+        <span class="muted small">Only staff see these. Changes are logged.</span></div>
+      <textarea id="pnotes" rows="3" maxlength="4000" placeholder="Anything the next officer should know">${esc(d.notes || '')}</textarea>
+      <button class="btn secondary sm-btn" data-savenotes type="button" style="margin-top:8px">Save notes</button>
     </section>
 
     <section class="card">
@@ -264,6 +279,20 @@ async function viewParticipant(id) {
     </section>`;
   v.querySelector('[data-report]').onclick = () => openReport(d.participant_id, d.name);
   v.querySelector('[data-code]').onclick = () => accessCode(d.participant_id, d.name);
+  v.querySelector('[data-edit]').onclick = () => editSheet(d);
+  v.querySelector('[data-addreq]').onclick = () => requirementSheet(d.participant_id);
+  v.querySelector('[data-savenotes]').onclick = async e => {
+    e.target.disabled = true;
+    try {
+      await api(`/api/participants/${d.participant_id}`, { method: 'PATCH',
+        body: JSON.stringify({ notes: $('#pnotes').value }) });
+      toast('Notes saved.');
+    } catch (err) { toast(err.message); }
+    e.target.disabled = false;
+  };
+  v.querySelectorAll('[data-editreq]').forEach(b => b.onclick = () =>
+    requirementSheet(d.participant_id, d.requirements.find(r => r.id === Number(b.dataset.editreq))));
+  v.querySelectorAll('[data-delreq]').forEach(b => b.onclick = () => removeRequirement(b.dataset.delreq, id));
   v.querySelector('[data-more]')?.addEventListener('click', () => { tlLimit = 9999; viewParticipant(id); });
   tlLimit = 20;
 }
@@ -318,6 +347,167 @@ function trendChart(r) {
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`Attendance per ${r.period} against the requirement of ${r.count_required}`)}">
     ${g}${bars}<line class="req" x1="${P.l}" x2="${W - P.r}" y1="${y(r.count_required)}" y2="${y(r.count_required)}"/>
     <text class="lbl strong" x="${W - P.r}" y="${y(r.count_required) - 5}" text-anchor="end">required ${r.count_required}</text></svg>`;
+}
+
+/* ---------- enrolling and editing ---------- */
+
+async function pickers() {
+  if (S.pickers) return S.pickers;
+  const [officers, programs] = await Promise.all([api('/api/officers'), api('/api/programs')]);
+  S.pickers = { officers, programs };
+  return S.pickers;
+}
+
+const optionList = (rows, selected, label = r => r.name) => rows.map(r =>
+  `<option value="${r.id}" ${String(r.id) === String(selected) ? 'selected' : ''}>${esc(label(r))}</option>`).join('');
+
+async function enrolSheet() {
+  const { officers, programs } = await pickers();
+  const sh = sheet(`<form class="step left" id="enrolForm">
+    <h2>Add a participant</h2>
+    <p class="muted">The mobile number is how they sign in, so it has to be theirs. You will get a code to give them.</p>
+    <label>Name<input name="name" required maxlength="120" autocomplete="off" placeholder="First and last name"></label>
+    <label>Mobile number<input name="phone" type="tel" required maxlength="32" placeholder="(734) 555-0101"></label>
+    <div class="two">
+      <label>Case number<input name="case_number" maxlength="64" placeholder="26-1234-FH"></label>
+      <label>Program<select name="program_id"><option value="">None</option>${optionList(programs, '')}</select></label>
+    </div>
+    <label>Officer<select name="officer_id">${optionList(officers, S.me.id)}</select></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Add participant</button>
+  </form>`, { label: 'Add a participant' });
+  const form = sh.body.querySelector('#enrolForm');
+  form.name.focus();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Adding';
+    const body = Object.fromEntries(new FormData(form));
+    body.program_id = body.program_id ? Number(body.program_id) : null;
+    body.officer_id = Number(body.officer_id);
+    try {
+      const made = await api('/api/participants', { method: 'POST', body: JSON.stringify(body) });
+      sh.set(`<div class="step">
+        <div class="hero-ic tone-ok">${icon('check')}</div>
+        <h2>${esc(made.name)} is enrolled</h2>
+        <p class="muted">They sign in on the phone app with <b>${esc(made.phone)}</b> and this code, which works once, for ${made.code_minutes} minutes.</p>
+        <p class="bigcode">${esc(made.sign_in_code.slice(0, 3))} ${esc(made.sign_in_code.slice(3))}</p>
+        <a class="btn block" href="#participant/${made.participant_id}" data-close>Open their record</a>
+        <button class="btn block ghost" data-close type="button">Done</button>
+      </div>`);
+      viewCaseload();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Add participant';
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+}
+
+async function editSheet(d) {
+  const { officers, programs } = await pickers();
+  const sh = sheet(`<form class="step left" id="editForm">
+    <h2>Edit ${esc(d.name)}</h2>
+    <label>Name<input name="name" required maxlength="120" value="${esc(d.name)}"></label>
+    <label>Mobile number<input name="phone" type="tel" required maxlength="32" value="${esc(d.phone || '')}"></label>
+    <div class="two">
+      <label>Case number<input name="case_number" maxlength="64" value="${esc(d.case_number || '')}"></label>
+      <label>Officer<select name="officer_id">${optionList(officers, d.officer_id)}</select></label>
+    </div>
+    <label>Program<select name="program_id"><option value="">None</option>${optionList(programs, d.program_id)}</select></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Save changes</button>
+    <button class="btn block ghost danger-link" data-close-case type="button">Close this case</button>
+  </form>`, { label: 'Edit participant' });
+  const form = sh.body.querySelector('#editForm');
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(form));
+    body.program_id = body.program_id ? Number(body.program_id) : null;
+    body.officer_id = Number(body.officer_id);
+    try {
+      await api(`/api/participants/${d.participant_id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      sh.close(); toast('Saved.'); viewParticipant(d.participant_id);
+    } catch (err) {
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+  form.querySelector('[data-close-case]').onclick = () => {
+    sh.set(`<div class="step left"><h2>Close this case?</h2>
+      <p class="muted">${esc(d.name)} is signed out and cannot check in again. The record stays, and the case can be reopened.</p>
+      <button class="btn block danger" data-yes type="button">Close the case</button>
+      <button class="btn block ghost" data-close type="button">Keep it open</button></div>`);
+    sh.body.querySelector('[data-yes]').onclick = async () => {
+      try {
+        await api(`/api/participants/${d.participant_id}`, { method: 'PATCH',
+          body: JSON.stringify({ active: false, ends_on: new Date().toISOString() }) });
+        sh.close(); toast('Case closed.'); location.hash = 'caseload';
+      } catch (err) { toast(err.message); }
+    };
+  };
+}
+
+/* Date inputs work in the local calendar. Going through toISOString would
+   read "tomorrow" any evening after 8pm Eastern, which is exactly when an
+   officer is catching up on paperwork. */
+function localDate(d) {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+const dateValue = iso => iso ? localDate(iso) : '';
+const dateToIso = v => v ? new Date(`${v}T12:00:00`).toISOString() : null;
+
+function requirementSheet(pid, existing = null) {
+  const r = existing || {};
+  const cats = [['public', 'Public meetings'], ['community_service', 'Community service'],
+    ['private', 'Private meetings'], ['any', 'Any meeting']];
+  const sh = sheet(`<form class="step left" id="reqForm">
+    <h2>${existing ? 'Amend the requirement' : 'Add a requirement'}</h2>
+    <p class="muted">What the order says, in the court's words: how many, of what, per week or month.</p>
+    <div class="two">
+      <label>How many<input name="count_required" type="number" min="1" max="50" required value="${r.count_required || 3}"></label>
+      <label>Per<select name="period">
+        <option value="week" ${r.period === 'week' || !r.period ? 'selected' : ''}>Week</option>
+        <option value="month" ${r.period === 'month' ? 'selected' : ''}>Month</option></select></label>
+    </div>
+    <label>Of what<select name="category">${cats.map(([v, l]) =>
+      `<option value="${v}" ${(r.category || 'public') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="two">
+      <label>Starts<input name="starts_on" type="date" required value="${dateValue(r.starts_on) || localDate(new Date())}"></label>
+      <label>Ends <span class="muted">(optional)</span><input name="ends_on" type="date" value="${dateValue(r.ends_on)}"></label>
+    </div>
+    <label>Court order reference<input name="order_reference" maxlength="120" value="${esc(r.order_reference || '')}" placeholder="ORD-26-123"></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">${existing ? 'Save the amendment' : 'Add requirement'}</button>
+    ${existing ? '<p class="fine">Amending changes what past weeks needed. The audit log keeps what it said before.</p>' : ''}
+  </form>`, { label: 'Requirement' });
+  const form = sh.body.querySelector('#reqForm');
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(form));
+    body.count_required = Number(body.count_required);
+    body.starts_on = dateToIso(body.starts_on);
+    body.ends_on = dateToIso(body.ends_on);
+    if (body.category === 'any') body.category = null;
+    if (!body.order_reference) delete body.order_reference;
+    try {
+      if (existing) await api(`/api/requirements/${existing.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      else await api('/api/requirements', { method: 'POST', body: JSON.stringify({ ...body, participant_id: pid }) });
+      sh.close(); toast(existing ? 'Requirement amended.' : 'Requirement added.'); viewParticipant(pid);
+    } catch (err) {
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+}
+
+function removeRequirement(rid, pid) {
+  const sh = sheet(`<div class="step left"><h2>Remove this requirement?</h2>
+    <p class="muted">Use this for one entered by mistake. If the order ended, amend it with an end date instead, so the history still makes sense.</p>
+    <button class="btn block danger" data-yes type="button">Remove it</button>
+    <button class="btn block ghost" data-close type="button">Cancel</button></div>`, { label: 'Remove requirement' });
+  sh.body.querySelector('[data-yes]').onclick = async () => {
+    try { await api(`/api/requirements/${rid}`, { method: 'DELETE' }); sh.close(); toast('Requirement removed.'); viewParticipant(pid); }
+    catch (err) { sh.close(); toast(err.message); }
+  };
 }
 
 /* A code to read out so the participant can sign in on their phone. Until

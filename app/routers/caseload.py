@@ -13,12 +13,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import compliance, reviewing
-from ..auth import audit, require, scope_to_county
+from ..auth import audit, end_all_sessions, require, scope_to_county
+from ..config import settings
 from ..db import get_db
 from ..models import (
     CheckIn, County, Meeting, MeetingSource, Participant, Program, Requirement, Role, User,
 )
-from ..schemas import ParticipantIn, RequirementIn, checkin_out
+from ..schemas import (
+    ParticipantIn, ParticipantPatch, RequirementIn, RequirementPatch, checkin_out,
+)
+from ..security import normalize_phone
+from .auth import issue_first_code
 
 router = APIRouter(prefix="/api", tags=["caseload"])
 
@@ -117,6 +122,8 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
         "participant_id": p.id, "user_id": p.user_id, "name": p.user.name,
         "email": p.user.email, "phone": p.user.phone, "case_number": p.case_number,
         "officer": p.officer.name if p.officer else None,
+        "officer_id": p.officer_id, "program_id": p.program_id, "active": p.user.active,
+        "ends_on": p.ends_on.isoformat() if p.ends_on else None,
         "enrolled_on": p.enrolled_on.isoformat(),
         "notes": p.notes,
         "summary": compliance.summarize(db, p, tz),
@@ -127,36 +134,133 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
 @router.post("/participants", status_code=201)
 def create_participant(body: ParticipantIn, request: Request, db: Session = Depends(get_db),
                        user: User = Depends(require(*STAFF))):
-    u = User(county_id=user.county_id, role=Role.participant, name=body.name,
-             email=body.email, phone=body.phone)
+    """
+    Enrol someone. The phone number is how they sign in, so it has to be
+    there and it has to be theirs alone. The reply carries a first sign-in
+    code, so an officer sitting with the person can hand it over now.
+    """
+    phone = normalize_phone(body.phone)
+    if not phone:
+        raise HTTPException(422, "A mobile number is needed: it is how they sign in.")
+    clash = db.scalar(select(User).where(User.phone == phone, User.role == Role.participant))
+    if clash:
+        raise HTTPException(409, f"That number is already on file for {clash.name}.")
+
+    u = User(county_id=user.county_id, role=Role.participant, name=body.name.strip(),
+             email=(body.email or "").strip().lower() or None, phone=phone)
     db.add(u)
     db.flush()
     p = Participant(county_id=user.county_id, user_id=u.id,
                     program_id=body.program_id, officer_id=body.officer_id or user.id,
-                    case_number=body.case_number)
+                    case_number=(body.case_number or "").strip() or None)
     db.add(p)
     db.commit()
     audit(db, user, "create_participant", target_type="participant", target_id=p.id,
-          detail=body.name, request=request)
-    return {"participant_id": p.id, "user_id": u.id, "name": u.name}
+          detail=u.name, request=request)
+
+    code = issue_first_code(db, u, user)
+    return {"participant_id": p.id, "user_id": u.id, "name": u.name, "phone": u.phone,
+            "sign_in_code": code, "code_minutes": settings.LOGIN_CODE_MINUTES}
+
+
+@router.patch("/participants/{participant_id}")
+def update_participant(participant_id: int, body: ParticipantPatch, request: Request,
+                       db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
+    """Correct a case number, hand the case to another officer, close it."""
+    p = _own_participant(db, participant_id, user)
+    person = db.get(User, p.user_id)
+    changed = []
+
+    data = body.model_dump(exclude_unset=True)
+    if "phone" in data:
+        phone = normalize_phone(data["phone"])
+        if not phone:
+            raise HTTPException(422, "A mobile number is needed: it is how they sign in.")
+        clash = db.scalar(select(User).where(User.phone == phone, User.role == Role.participant,
+                                             User.id != person.id))
+        if clash:
+            raise HTTPException(409, f"That number is already on file for {clash.name}.")
+        if phone != person.phone:
+            person.phone = phone
+            changed.append("phone")
+    for field in ("name", "email"):
+        if field in data and data[field] is not None:
+            value = data[field].strip() or None
+            if field == "email" and value:
+                value = value.lower()
+            if value != getattr(person, field):
+                setattr(person, field, value)
+                changed.append(field)
+    for field in ("case_number", "program_id", "officer_id", "notes"):
+        if field in data and data[field] != getattr(p, field):
+            setattr(p, field, data[field])
+            changed.append(field)
+    if "ends_on" in data:
+        p.ends_on = _aware(data["ends_on"])
+        changed.append("ends_on")
+    if "active" in data and data["active"] != person.active:
+        person.active = data["active"]
+        changed.append("closed" if not data["active"] else "reopened")
+        if not data["active"]:
+            end_all_sessions(db, person)              # a closed case signs out
+    db.commit()
+    audit(db, user, "update_participant", target_type="participant", target_id=p.id,
+          detail=f"{person.name}: {', '.join(changed) or 'no change'}", request=request)
+    return {"participant_id": p.id, "changed": changed}
 
 
 @router.post("/requirements", status_code=201)
 def create_requirement(body: RequirementIn, request: Request, db: Session = Depends(get_db),
                        user: User = Depends(require(*STAFF))):
-    p = db.get(Participant, body.participant_id)
-    if not p or (user.role != Role.superuser and p.county_id != user.county_id):
-        raise HTTPException(404, "participant not found")
+    p = _own_participant(db, body.participant_id, user)
     data = body.model_dump()
     for k in ("starts_on", "ends_on"):
-        if data.get(k) and data[k].tzinfo is None:
-            data[k] = data[k].replace(tzinfo=timezone.utc)
+        data[k] = _aware(data.get(k))
+    if data["ends_on"] and data["ends_on"] <= data["starts_on"]:
+        raise HTTPException(422, "The end date has to be after the start date.")
     r = Requirement(county_id=p.county_id, **data)
     db.add(r)
     db.commit()
     audit(db, user, "create_requirement", target_type="participant", target_id=p.id,
-          detail=f"{r.count_required}/{r.period.value}", request=request)
+          detail=f"{r.count_required} {r.category.value if r.category else 'any'} per "
+                 f"{r.period.value}", request=request)
     return {"id": r.id}
+
+
+@router.patch("/requirements/{requirement_id}")
+def update_requirement(requirement_id: int, body: RequirementPatch, request: Request,
+                       db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
+    """
+    An order gets amended. Changing the count or the dates changes what past
+    periods needed, so the audit row keeps what it was before.
+    """
+    r = db.get(Requirement, requirement_id)
+    if not r or (user.role != Role.superuser and r.county_id != user.county_id):
+        raise HTTPException(404, "requirement not found")
+    before = (f"{r.count_required} {r.category.value if r.category else 'any'} per "
+              f"{r.period.value} from {r.starts_on.date()}")
+    data = body.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(r, field, _aware(value) if field in ("starts_on", "ends_on") else value)
+    if r.ends_on and r.ends_on <= r.starts_on:
+        raise HTTPException(422, "The end date has to be after the start date.")
+    db.commit()
+    audit(db, user, "update_requirement", target_type="participant", target_id=r.participant_id,
+          detail=f"was {before}", request=request)
+    return {"id": r.id}
+
+
+def _own_participant(db: Session, participant_id: int, user: User) -> Participant:
+    p = db.get(Participant, participant_id)
+    if not p or (user.role != Role.superuser and p.county_id != user.county_id):
+        raise HTTPException(404, "participant not found")
+    return p
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 @router.delete("/requirements/{requirement_id}", status_code=204)

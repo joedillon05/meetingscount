@@ -72,6 +72,27 @@ class ParticipantIn(BaseModel):
     case_number: Optional[str] = None
 
 
+class ParticipantPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+    email: Optional[str] = Field(default=None, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    case_number: Optional[str] = Field(default=None, max_length=64)
+    program_id: Optional[int] = None
+    officer_id: Optional[int] = None
+    notes: Optional[str] = Field(default=None, max_length=4000)
+    ends_on: Optional[datetime] = None
+    active: Optional[bool] = None
+
+
+class RequirementPatch(BaseModel):
+    category: Optional[MeetingCategory] = None
+    count_required: Optional[int] = Field(default=None, ge=1, le=50)
+    period: Optional[RequirementPeriod] = None
+    starts_on: Optional[datetime] = None
+    ends_on: Optional[datetime] = None
+    order_reference: Optional[str] = Field(default=None, max_length=120)
+
+
 class ConsentIn(BaseModel):
     version: str
 

@@ -169,6 +169,11 @@ def _issue_code(db: Session, user: User, *, by: User | None, via: str) -> str:
     return code
 
 
+def issue_first_code(db: Session, person: User, by: User) -> str:
+    """A code for someone just enrolled, so they can sign in before they leave."""
+    return _issue_code(db, person, by=by, via="officer")
+
+
 @router.post("/code/request")
 def request_code(body: CodeRequestIn, request: Request, db: Session = Depends(get_db)):
     """
