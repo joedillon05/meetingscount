@@ -16,7 +16,7 @@ const download = makeDownload(identity);
 const app = $('#app');
 
 const S = {
-  me: null, staff: null, view: null, cases: [], stats: {},
+  ctx: {}, me: null, staff: null, view: null, cases: [], stats: {},
   scope: 'all', status: '', search: '', sortKey: null, sortAsc: true, mmap: null, pin: null,
 };
 
@@ -34,14 +34,21 @@ const engine = s => ({ confirmed: ['Confirmed', 'ok', 'check'], flagged: ['Flagg
 /* ---------- boot ---------- */
 
 async function boot() {
-  try {
-    S.staff = (await api('/api/users')).filter(u => u.role !== 'participant');
-    if (!S.staff.some(u => String(u.id) === identity.get())) {
-      identity.set((S.staff.find(u => u.role === 'officer') || S.staff[0]).id);
-    }
-  } catch { S.staff = null; }
+  try { S.ctx = await api('/api/auth/context'); } catch { S.ctx = {}; }
 
-  try { S.me = await api('/api/me'); } catch (e) { return e.status === 401 ? signedOut() : fatal(e); }
+  if (S.ctx.dev_auth) {
+    try {
+      S.staff = (await api('/api/users')).filter(u => u.role !== 'participant');
+      if (!S.staff.some(u => String(u.id) === identity.get())) {
+        identity.set((S.staff.find(u => u.role === 'officer') || S.staff[0]).id);
+      }
+    } catch { S.staff = null; }
+  } else {
+    S.staff = null;
+    identity.clear();
+  }
+
+  try { S.me = await api('/api/me'); } catch (e) { return e.status === 401 ? signIn() : fatal(e); }
   if (S.me.role === 'participant') return participantHere();
   setTimeZone(S.me.timezone);
   renderShell();
@@ -71,11 +78,12 @@ function renderShell() {
       <span class="spacer"></span>
       ${S.staff ? `<a class="navlink" href="/ops">Ops</a><a class="navlink" href="/">Phone app</a>
         <button class="chip demo" data-act="switch" type="button">Demo · ${esc(S.me.name)}</button>`
-        : `<span class="who">${esc(S.me.name)}</span>`}
+        : `<button class="chip who" data-act="account" type="button">${icon('user')} ${esc(S.me.name)}</button>`}
     </header>
     <main id="view" tabindex="-1"></main>`;
   app.addEventListener('click', e => {
     if (e.target.closest('[data-act="switch"]')) switchUser();
+    if (e.target.closest('[data-act="account"]')) accountSheet();
   });
 }
 
@@ -234,6 +242,7 @@ async function viewParticipant(id) {
         <p class="muted">${[d.case_number && `Case ${esc(d.case_number)}`, d.officer && esc(d.officer),
           `enrolled ${esc(shortDay(d.enrolled_on))}`].filter(Boolean).join(' · ')}</p></div>
       ${pill(s.overall)}
+      <button class="btn secondary" data-code type="button">${icon('keyboard')} Sign-in code</button>
       <button class="btn secondary" data-report type="button">${icon('file')} Compliance report</button>
     </section>
 
@@ -254,6 +263,7 @@ async function viewParticipant(id) {
       ${d.timeline.length > tlLimit ? `<button class="btn ghost" data-more type="button">Show all ${d.timeline.length}</button>` : ''}
     </section>`;
   v.querySelector('[data-report]').onclick = () => openReport(d.participant_id, d.name);
+  v.querySelector('[data-code]').onclick = () => accessCode(d.participant_id, d.name);
   v.querySelector('[data-more]')?.addEventListener('click', () => { tlLimit = 9999; viewParticipant(id); });
   tlLimit = 20;
 }
@@ -308,6 +318,23 @@ function trendChart(r) {
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`Attendance per ${r.period} against the requirement of ${r.count_required}`)}">
     ${g}${bars}<line class="req" x1="${P.l}" x2="${W - P.r}" y1="${y(r.count_required)}" y2="${y(r.count_required)}"/>
     <text class="lbl strong" x="${W - P.r}" y="${y(r.count_required) - 5}" text-anchor="end">required ${r.count_required}</text></svg>`;
+}
+
+/* A code to read out so the participant can sign in on their phone. Until
+   SMS is wired up this is how someone gets in on a new device, and it is in
+   the audit log like any other access. */
+async function accessCode(pid, name) {
+  let r;
+  try { r = await api(`/api/auth/participants/${pid}/access-code`, { method: 'POST' }); }
+  catch (e) { return toast(e.message); }
+  sheet(`<div class="step">
+    <h2>Sign-in code for ${esc(name)}</h2>
+    <p class="muted">Read this out, or write it down for them. It works once, for ${r.minutes} minutes.</p>
+    <p class="bigcode">${esc(r.code.slice(0, 3))} ${esc(r.code.slice(3))}</p>
+    <p class="muted">They open the phone app, enter <b>${esc(r.phone)}</b>, then this code.</p>
+    <p class="fine">Issuing a code is written to the audit log.</p>
+    <button class="btn block" data-close type="button">Done</button>
+  </div>`, { label: 'Sign-in code' });
 }
 
 async function openReport(pid, name) {
@@ -499,9 +526,175 @@ function switchUser() {
   });
 }
 
-function signedOut() {
-  app.innerHTML = `<main class="center-screen">${logo()}<h1>Sign in</h1>
-    <p class="muted">Staff sign in with their county account and a second factor.</p></main>`;
+/* ---------- signing in ---------- */
+
+function signIn({ email = '', mfa = false, message = '' } = {}) {
+  app.innerHTML = `<main class="signin-page">
+    <form class="card signin-card" id="signinForm" novalidate>
+      <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+      <h1>${mfa ? 'One more step' : 'Staff sign-in'}</h1>
+      <p class="muted">${mfa ? 'Enter the six-digit code from your authenticator app.'
+        : 'For probation officers and county staff. Participants use the phone app.'}</p>
+      <label>Email<input name="email" type="email" autocomplete="username" required
+        value="${esc(email)}" ${mfa ? 'readonly' : ''}></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      ${mfa ? `<label>Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code"
+        maxlength="6" class="code-input" placeholder="000000" required></label>` : ''}
+      <p class="err" id="signinErr" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</p>
+      <button class="btn block" type="submit">Sign in</button>
+      ${S.ctx.demo ? demoPanel() : ''}
+    </form>
+  </main>`;
+  const form = $('#signinForm');
+  (mfa ? form.code : form.email).focus();
+  if (S.ctx.demo) loadDemoAccounts();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Signing in';
+    const body = { email: form.email.value.trim(), password: form.password.value,
+                   code: form.code ? form.code.value.trim() : null };
+    try {
+      const r = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
+      if (r.mfa_required) return signIn({ email: body.email, mfa: true });
+      location.reload();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      const el = $('#signinErr'); el.textContent = err.message; el.hidden = false;
+      form.password.value = '';
+      (mfa ? form.code : form.password).focus();
+    }
+  };
+}
+
+/* On a demo deployment the seeded accounts are listed, so a demonstration
+   does not open with someone mistyping a password. MC_DEMO=0 removes it. */
+function demoPanel() {
+  return `<div class="demo-panel"><b>${icon('users')} Demo accounts</b>
+    <p class="muted small">This is seeded data, not a real county.</p>
+    <div id="demoList" class="muted small">Loading…</div></div>`;
+}
+
+async function loadDemoAccounts() {
+  let d;
+  try { d = await api('/api/auth/demo-accounts'); } catch { return; }
+  const list = $('#demoList');
+  if (!list) return;
+  const nice = { admin: 'county admin', officer: 'probation officer' };
+  list.innerHTML = d.staff.map(u => `<button type="button" class="demo-row" data-email="${esc(u.email)}">
+      <span>${esc(u.name.replace(/ \(county\)$/, ''))}<span class="muted"> · ${esc(nice[u.role] || u.role)}</span></span>
+      <span class="muted">use</span></button>`).join('')
+    + `<p class="muted small">Participants sign in on the phone app with a phone number such as
+       <b>${esc(d.participants[0]?.phone || '')}</b> and a code their officer reads out.</p>`;
+  list.onclick = e => {
+    const row = e.target.closest('[data-email]');
+    if (!row) return;
+    const form = $('#signinForm');
+    form.email.value = row.dataset.email;
+    form.password.value = d.password;
+    form.querySelector('button[type=submit]').focus();
+  };
+}
+
+function accountSheet() {
+  const sh = sheet(`<div class="step left">
+    <h2>${esc(S.me.name)}</h2>
+    <p class="muted">${esc(S.me.role)}${S.me.county ? ` · ${esc(S.me.county)}` : ''}</p>
+    <div class="acct-rows">
+      <button class="link-row" data-a="password" type="button">${icon('shield')}
+        <span><b>Change password</b><br><span class="muted small">Signs out every other device</span></span></button>
+      <button class="link-row" data-a="mfa" type="button">${icon('keyboard')}
+        <span><b>Authenticator app</b><br><span class="muted small" id="mfaState">Checking…</span></span></button>
+      <button class="link-row" data-a="signout" type="button">${icon('back')}
+        <span><b>Sign out</b></span></button>
+    </div>
+  </div>`, { label: 'Your account' });
+  api('/api/me').then(me => {
+    const el = sh.body.querySelector('#mfaState');
+    if (el) el.textContent = me.mfa ? 'On. A code is required at sign-in.' : 'Off. Turn it on for a second factor.';
+    sh.body.dataset.mfa = me.mfa ? '1' : '';
+  }).catch(() => {});
+  sh.body.onclick = e => {
+    const b = e.target.closest('[data-a]');
+    if (!b) return;
+    if (b.dataset.a === 'signout') return signOut();
+    sh.close();
+    if (b.dataset.a === 'password') passwordSheet();
+    else mfaSheet(sh.body.dataset.mfa === '1');
+  };
+}
+
+function passwordSheet() {
+  const sh = sheet(`<form class="step left" id="pwForm">
+    <h2>Change password</h2>
+    <p class="muted">At least 12 characters. A phrase you can remember beats a short scramble.</p>
+    <label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+    <label>New password<input name="new_password" type="password" autocomplete="new-password" required></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Change password</button>
+  </form>`, { label: 'Change password' });
+  const form = sh.body.querySelector('#pwForm');
+  form.current_password.focus();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('/api/auth/password', { method: 'POST', body: JSON.stringify({
+        current_password: form.current_password.value, new_password: form.new_password.value }) });
+      sh.close();
+      toast('Password changed. Other devices are signed out.');
+    } catch (err) {
+      const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false;
+    }
+  };
+}
+
+async function mfaSheet(enabled) {
+  if (enabled) {
+    const sh = sheet(`<form class="step left" id="offForm">
+      <h2>Turn off the authenticator app</h2>
+      <p class="muted">Sign-in will need only your password after this.</p>
+      <label>Your password<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <p class="err" role="alert" hidden></p>
+      <button class="btn block danger" type="submit">Turn it off</button>
+    </form>`, { label: 'Authenticator app' });
+    const form = sh.body.querySelector('#offForm');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      try {
+        await api('/api/auth/totp/disable', { method: 'POST',
+          body: JSON.stringify({ current_password: form.current_password.value }) });
+        sh.close(); toast('Authenticator app turned off.');
+      } catch (err) { const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false; }
+    };
+    return;
+  }
+  let start;
+  try { start = await api('/api/auth/totp/start', { method: 'POST' }); }
+  catch (e) { return toast(e.message); }
+  const sh = sheet(`<form class="step left" id="onForm">
+    <h2>Set up an authenticator app</h2>
+    <p class="muted">In Google Authenticator, 1Password, Authy or similar, add an account by hand and type this key:</p>
+    <p class="secret">${esc(start.formatted)}</p>
+    <p class="fine">Account: ${esc(S.me.name)} · Issuer: MeetingsCount · 6 digits · 30 seconds</p>
+    <label>Then enter the code it shows<input name="code" inputmode="numeric" maxlength="6"
+      class="code-input" placeholder="000000" autocomplete="one-time-code" required></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Turn it on</button>
+  </form>`, { label: 'Authenticator app' });
+  const form = sh.body.querySelector('#onForm');
+  form.code.focus();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('/api/auth/totp/enable', { method: 'POST', body: JSON.stringify({ code: form.code.value.trim() }) });
+      sh.close(); toast('Authenticator app is on. You will need a code next time you sign in.');
+    } catch (err) { const el = form.querySelector('.err'); el.textContent = err.message; el.hidden = false; }
+  };
+}
+
+async function signOut() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* going anyway */ }
+  location.href = '/officer';
 }
 
 function participantHere() {

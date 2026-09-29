@@ -21,6 +21,9 @@ def _db_url_from_parts() -> str | None:
     return f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{name}"
 
 
+_EPHEMERAL_KEY: bytes | None = None
+
+
 class Settings:
     # sqlite for local dev, postgresql+psycopg2://... in Docker and on AWS.
     # On AWS the parts arrive as separate secrets straight from the RDS secret,
@@ -55,6 +58,32 @@ class Settings:
     # are. Never a substitute for real accounts, and never in front of real
     # participant data.
     ACCESS_PASSWORD: str = os.environ.get("MC_ACCESS_PASSWORD", "")
+
+    # Keys one-time codes are signed with. Set MC_SECRET_KEY in any
+    # deployment: without it a restart invalidates codes people are holding.
+    SECRET_KEY: str = os.environ.get("MC_SECRET_KEY", "")
+
+    # How long a signed-in session lasts. Staff sessions are short and time
+    # out while idle, which is what a county security review expects. A
+    # participant's phone stays signed in, because making someone re-enter a
+    # code in a church basement with no signal is how check-ins get missed.
+    STAFF_SESSION_HOURS: int = int(os.environ.get("MC_STAFF_SESSION_HOURS", "12"))
+    STAFF_IDLE_MINUTES: int = int(os.environ.get("MC_STAFF_IDLE_MINUTES", "30"))
+    PARTICIPANT_SESSION_DAYS: int = int(os.environ.get("MC_PARTICIPANT_SESSION_DAYS", "30"))
+    LOGIN_CODE_MINUTES: int = int(os.environ.get("MC_LOGIN_CODE_MINUTES", "60"))
+
+    COOKIE_NAME: str = "mc_session"
+
+    @property
+    def secret_key_bytes(self) -> bytes:
+        if self.SECRET_KEY:
+            return self.SECRET_KEY.encode()
+        # Dev and tests: a key for this process only.
+        global _EPHEMERAL_KEY
+        if _EPHEMERAL_KEY is None:
+            import secrets as _secrets
+            _EPHEMERAL_KEY = _secrets.token_bytes(32)
+        return _EPHEMERAL_KEY
 
     @property
     def is_postgres(self) -> bool:

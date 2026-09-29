@@ -154,3 +154,18 @@ body.bare { background: var(--surface); }
 .thread li p { color: var(--ink-2); }
 .thread .from-officer { background: var(--tbg); justify-self: start; border-bottom-left-radius: 4px; }
 .thread .from-you { background: var(--brand-tint); justify-self: end; border-bottom-right-radius: 4px; }
+
+/* ---------- signing in ---------- */
+.signin { max-width: 440px; margin: 0 auto; display: grid; gap: 14px;
+  padding: calc(40px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom)); }
+.signin-head { display: flex; align-items: center; gap: 9px; font-weight: 700; margin-bottom: 14px; }
+.signin-head .logo { width: 30px; height: 30px; }
+.signin h1 { font-size: 30px; line-height: 1.12; letter-spacing: -.025em; font-weight: 780; }
+.signin form { display: grid; gap: 8px; margin-top: 10px; }
+.signin label { font-size: 14px; font-weight: 650; color: var(--ink-2); }
+.signin .btn { margin-top: 8px; }
+.signin .err { color: var(--bad); font-weight: 600; font-size: 14px; }
+.signin .err[hidden] { display: none; }
+.code-input { font-size: 30px; letter-spacing: .34em; text-align: center; font-variant-numeric: tabular-nums;
+  padding: 14px 10px; font-weight: 700; }
+b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nums; }

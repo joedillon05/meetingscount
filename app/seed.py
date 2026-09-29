@@ -26,6 +26,8 @@ from .models import (
     MeetingSource, Participant, Program, Requirement, RequirementPeriod, Review,
     ReviewDecision, Role, User,
 )
+from .routers.auth import DEMO_PASSWORD
+from .security import hash_password
 from .verification import CheckInContext, MeetingSpec, verify
 
 M_PER_DEG = 111_320
@@ -129,6 +131,11 @@ def seed(reset: bool = True) -> dict:
             User(county_id=county.id, role=Role.officer, name="Officer Chen",
                  email="chen@example.gov"),
         ]
+        # Demo staff can sign in. One password for all three, printed on the
+        # sign-in screen while MC_DEMO is on, and meaningless anywhere real.
+        for person in (admin, *officers):
+            person.password_hash = hash_password(DEMO_PASSWORD)
+            person.password_set_at = now
         db.add_all([admin, *officers])
         db.flush()
 
@@ -164,9 +171,11 @@ def seed(reset: bool = True) -> dict:
                             if m.category == MeetingCategory.community_service and m.starts_at < now]
 
         participants: list[Participant] = []
-        for name, oi, pattern in PARTICIPANTS:
+        for idx, (name, oi, pattern) in enumerate(PARTICIPANTS, start=1):
+            # Readable, stable numbers: a demo works better when the phone
+            # number on screen is one someone can type without squinting.
             u = User(county_id=county.id, role=Role.participant, name=name,
-                     email=None, phone=f"+1734555{rng.randint(1000, 9999)}")
+                     email=None, phone=f"+1734555{100 + idx:04d}")
             if pattern != "first_day":
                 # Everyone with history has been through the consent screen.
                 u.consented_at = now - timedelta(days=60)

@@ -285,3 +285,30 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var
 /* Leaflet's panes use z-indexes in the hundreds; keep them inside the map
    so they never paint over the sticky header. */
 .leaflet-container { font: inherit; position: relative; z-index: 0; }
+
+/* ---------- signing in ---------- */
+.signin-page { display: grid; place-items: center; min-height: 100dvh; padding: 24px; }
+.signin-card { width: 100%; max-width: 420px; display: grid; gap: 10px; padding: 26px; }
+.signin-head { display: flex; align-items: center; gap: 9px; font-weight: 750; }
+.signin-head .logo { width: 28px; height: 28px; }
+.signin-card h1 { font-size: 24px; letter-spacing: -.02em; margin-top: 8px; }
+.signin-card label { display: grid; gap: 5px; font-size: 13px; font-weight: 650; color: var(--ink-2); }
+.signin-card .btn { margin-top: 6px; }
+.signin-card .err { color: var(--bad); font-weight: 600; font-size: 14px; }
+.signin-card .err[hidden] { display: none; }
+.code-input { font-size: 22px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; font-weight: 700; }
+.demo-panel { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 12px; display: grid; gap: 6px; }
+.demo-panel b { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.demo-row { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+  cursor: pointer; font-size: 13.5px; font-weight: 600; margin-top: 4px; }
+.demo-row:hover { border-color: var(--brand); }
+.chip.who { background: var(--surface-2); color: var(--ink); }
+.acct-rows { display: grid; gap: 8px; margin-top: 6px; }
+.acct-rows .link-row { box-shadow: none; }
+.secret { font: 600 18px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em;
+  background: var(--surface-2); border-radius: 10px; padding: 12px 14px; text-align: center; user-select: all; }
+
+.bigcode { font: 800 46px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em;
+  background: var(--brand-tint); color: var(--brand); border-radius: 14px; padding: 18px 10px;
+  text-align: center; user-select: all; }

@@ -16,7 +16,7 @@ const api = makeApi(identity);
 const app = $('#app');
 
 const S = {
-  me: null, devUsers: null, meetings: [], mine: [], progress: null,
+  ctx: {}, me: null, devUsers: null, meetings: [], mine: [], progress: null,
   tab: 'today', loaded: false, installPrompt: null,
 };
 
@@ -94,19 +94,26 @@ async function boot() {
   watchConnection();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installPrompt = e; });
 
-  // Dev auth: pick a demo participant so the page works without a login.
-  try {
-    const users = await api('/api/users');
-    S.devUsers = users.filter(u => u.role === 'participant');
-    if (!S.devUsers.some(u => String(u.id) === identity.get()) && S.devUsers.length) {
-      identity.set(S.devUsers[0].id);
-    }
-  } catch { S.devUsers = null; }
+  try { S.ctx = await api('/api/auth/context'); } catch { S.ctx = {}; }
+
+  if (S.ctx.dev_auth) {
+    // Local development: pick a demo participant, no sign-in.
+    try {
+      const users = await api('/api/users');
+      S.devUsers = users.filter(u => u.role === 'participant');
+      if (!S.devUsers.some(u => String(u.id) === identity.get()) && S.devUsers.length) {
+        identity.set(S.devUsers[0].id);
+      }
+    } catch { S.devUsers = null; }
+  } else {
+    S.devUsers = null;
+    identity.clear();                      // a stale demo id is not a sign-in
+  }
 
   try {
     S.me = await api('/api/me');
   } catch (e) {
-    return e.status === 401 ? renderSignedOut() : renderFatal(e);
+    return e.status === 401 ? renderSignIn() : renderFatal(e);
   }
   if (S.me.role !== 'participant') return renderStaffHere();
   setTimeZone(S.me.timezone);
@@ -816,6 +823,9 @@ function viewYou() {
     ${!standalone && (S.installPrompt || ios) ? `<button class="link-row" data-act="install" type="button">${icon('install')}
       <span><b>Add to your home screen</b><br><span class="muted small">Opens like an app, one tap from your home screen.</span></span>${icon('arrow', 'muted')}</button>` : ''}
 
+    ${S.ctx.dev_auth ? '' : `<button class="link-row" data-act="signout" type="button">${icon('back')}
+      <span><b>Sign out</b><br><span class="muted small">You will need a new code to sign back in.</span></span></button>`}
+
     ${S.devUsers ? `<section class="card dev">
       <h2 class="sec flush">Demo mode</h2>
       <p class="small muted">Dev auth is on, so there is no sign-in. Switch between the demo participants to see each story.</p>
@@ -902,12 +912,91 @@ function renderConsent() {
 
 /* ---------- other states ---------- */
 
-function renderSignedOut() {
+/* ---------- signing in ---------- */
+
+/* Phone number, then a one-time code. No password to forget, and a new phone
+   only needs a new code. */
+function renderSignIn(phone = '') {
   document.body.classList.add('bare');
-  // Phone-number sign-in arrives with Cognito (build section 7).
-  app.innerHTML = `<main class="consent center">${logo()}
-    <h1>Sign in to check in</h1>
-    <p class="lead">Use the sign-in link your officer sent you by text message.</p></main>`;
+  S.started = false;
+  app.innerHTML = `<main class="signin">
+    <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+    <h1>Sign in</h1>
+    <p class="lead">Enter the phone number your officer has on file. We will check a one-time code, not a password.</p>
+    <form id="phoneForm" novalidate>
+      <label for="phone">Phone number</label>
+      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+        placeholder="(734) 555-0101" value="${esc(phone)}" required>
+      <p class="err" id="signinErr" role="alert" hidden></p>
+      <button class="btn block big" type="submit">Continue</button>
+    </form>
+    <p class="fine center">Trouble signing in? Your officer can read you a code.</p>
+  </main>`;
+  const input = $('#phone');
+  input.focus();
+  $('#phoneForm').onsubmit = async e => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (value.replace(/\D/g, '').length < 10) return signInError('Enter the full phone number, including the area code.');
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Checking';
+    try {
+      const r = await api('/api/auth/code/request', { method: 'POST', body: JSON.stringify({ phone: value }) });
+      renderCodeStep(value, r);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Continue';
+      signInError(err.message);
+    }
+  };
+}
+
+function renderCodeStep(phone, sent) {
+  app.innerHTML = `<main class="signin">
+    <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+    <h1>Enter your code</h1>
+    <p class="lead">${sent.delivered
+      ? `We sent a six-digit code to ${esc(phone)}.`
+      : `Your officer can read you a six-digit code. It works for ${sent.minutes || 60} minutes.`}</p>
+    ${sent.demo_code ? `<p class="callout ok">${icon('note')} Demo: your code is <b class="code">${esc(sent.demo_code)}</b></p>` : ''}
+    <form id="codeForm" novalidate>
+      <label for="code">Six-digit code</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*"
+        maxlength="6" class="code-input" placeholder="000000" required>
+      <p class="err" id="signinErr" role="alert" hidden></p>
+      <button class="btn block big" type="submit">Sign in</button>
+      <button class="btn block ghost" type="button" data-back>Use a different number</button>
+    </form>
+  </main>`;
+  const input = $('#code');
+  input.focus();
+  input.addEventListener('input', () => {
+    input.value = input.value.replace(/\D/g, '').slice(0, 6);
+    if (input.value.length === 6) $('#codeForm').requestSubmit();
+  });
+  app.querySelector('[data-back]').onclick = () => renderSignIn(phone);
+  $('#codeForm').onsubmit = async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Checking';
+    try {
+      await api('/api/auth/code/verify', { method: 'POST', body: JSON.stringify({ phone, code: input.value }) });
+      location.reload();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      input.value = ''; input.focus();
+      signInError(err.message);
+    }
+  };
+}
+
+function signInError(message) {
+  const el = $('#signinErr');
+  if (el) { el.textContent = message; el.hidden = false; }
+}
+
+async function signOut() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* going anyway */ }
+  location.href = '/';
 }
 
 function renderStaffHere() {
@@ -915,7 +1004,8 @@ function renderStaffHere() {
   app.innerHTML = `<main class="consent center">${logo()}
     <h1>This is the participant app</h1>
     <p class="lead">You are signed in as staff. The officer dashboard is where you want to be.</p>
-    <a class="btn block" href="/officer">Open the officer dashboard</a></main>`;
+    <a class="btn block" href="/officer">Open the officer dashboard</a>
+    <button class="btn block ghost" data-act="signout" type="button">Sign out</button></main>`;
 }
 
 function renderFatal(e) {
@@ -939,6 +1029,7 @@ app.addEventListener('click', e => {
     export: exportRecord,
     install,
     switch: switchUser,
+    signout: signOut,
     retry: () => { S.loadError = null; renderTab(); refresh(); },
     reload: () => location.reload(),
   })[t.dataset.act]?.();

@@ -76,6 +76,30 @@ class ConsentIn(BaseModel):
     version: str
 
 
+class LoginIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(max_length=200)
+    code: Optional[str] = Field(default=None, max_length=10)      # authenticator app
+
+
+class CodeRequestIn(BaseModel):
+    phone: str = Field(max_length=32)
+
+
+class CodeVerifyIn(BaseModel):
+    phone: str = Field(max_length=32)
+    code: str = Field(max_length=10)
+
+
+class PasswordIn(BaseModel):
+    current_password: Optional[str] = Field(default=None, max_length=200)
+    new_password: str = Field(default="", max_length=200)
+
+
+class TotpIn(BaseModel):
+    code: str = Field(max_length=10)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

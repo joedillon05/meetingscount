@@ -2,12 +2,13 @@
 #
 #   fly launch --no-deploy --copy-config --name <your-app-name> --region ord
 #   fly volumes create mc_data --size 1 --region ord --yes
-#   fly secrets set MC_ACCESS_PASSWORD='<a long shared password>'
+#   fly secrets set MC_SECRET_KEY=$(openssl rand -hex 32)
 #   fly deploy
 #
-# Demo data only. MC_DEV_AUTH is on, which means anyone past the shared
-# password can act as anyone in the system. Real participants need real
-# sign-in first. See DEPLOY.md.
+# Demo data. Sign-in is real (staff use a password, participants a one-time
+# code), but MC_DEMO=1 lists the demo accounts on the sign-in screen and shows
+# participant codes on screen, so this configuration is for the seeded county
+# only. See DEPLOY.md before putting anyone real in it.
 
 app = "meetingscount-preview"
 primary_region = "ord"            # Chicago, the closest region to Michigan
@@ -16,7 +17,7 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
 
 [env]
   MC_DEMO = "1"
-  MC_DEV_AUTH = "1"
+  MC_DEV_AUTH = "0"                # no header shortcut: sign-in is real
   MC_SEED_ON_BOOT = "1"
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"

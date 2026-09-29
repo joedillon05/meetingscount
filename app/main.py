@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import create_all
-from .routers import admin, caseload, checkins, me, meetings, reports, reviews
+from .routers import admin, auth, caseload, checkins, me, meetings, reports, reviews
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
@@ -38,6 +38,14 @@ if os.environ.get("MC_ENV") == "production" and (settings.DEMO or settings.DEV_A
     raise RuntimeError(
         "Refusing to start: MC_DEMO and MC_DEV_AUTH must both be 0 in production."
     )
+
+if settings.DEMO:
+    print("MeetingsCount: MC_DEMO is on. The sign-in screen lists the demo accounts and "
+          "participant sign-in codes are shown on screen. Demo data only.")
+if settings.DEV_AUTH:
+    print("MeetingsCount: MC_DEV_AUTH is on. Anyone can claim to be anyone with a header. "
+          "Local development only.")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -55,7 +63,7 @@ app = FastAPI(
 )
 
 
-for r in (me.router, meetings.router, checkins.router, caseload.router,
+for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router):
     app.include_router(r)
 

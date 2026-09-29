@@ -33,5 +33,16 @@ def ids(client):
     }
 
 
+@pytest.fixture(autouse=True)
+def no_leftover_session(client):
+    """
+    A session cookie outranks the dev-auth header, so one test signing in
+    must not quietly make the next test somebody else.
+    """
+    client.cookies.clear()
+    yield
+    client.cookies.clear()
+
+
 def as_(uid):
     return {"X-MC-User": str(uid)}

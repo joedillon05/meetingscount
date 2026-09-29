@@ -8,19 +8,31 @@ Two different things, and the order matters.
 2. **A pilot**: real participants under real court orders. Needs sign-in
    first, and a few other things listed at the bottom. Not the same evening.
 
-## Why a preview cannot hold real people
+## Sign-in
 
-There is no sign-in yet. `MC_DEV_AUTH=1` means the client says who it is with
-an `X-MC-User` header and the server believes it, which is what the role
-switcher in the corner uses. Anyone past the shared password can be any
-officer, any admin, or any participant.
+Staff sign in with an email and a password, and an authenticator app if they
+turn one on. Participants sign in with their phone number and a six-digit
+code that their officer reads out from the participant's record. Sessions are
+cookies: staff sessions last 12 hours and end after 30 idle minutes,
+a participant's phone stays signed in for 30 days.
 
-Turning dev auth off (`MC_DEV_AUTH=0`) does not help today: every API call
-then needs a Cognito token, no screen issues one, and the app returns 401 to
-everything. Sign-in is the next piece of work.
+`MC_DEV_AUTH=1` is the old header shortcut, for local development only. It is
+off in `fly.toml` and must stay off anywhere else.
 
-So the preview runs with demo data only. Not one real name, phone number, case
-number or address.
+Set `MC_SECRET_KEY` in any deployment. Without it, a restart invalidates
+sign-in codes people are holding.
+
+## Why a preview still cannot hold real people
+
+`MC_DEMO=1` lists the demo staff accounts and their shared password on the
+sign-in screen, and shows a participant their code on screen instead of
+waiting for an officer to read it out. That is what makes a demo easy and it
+is exactly wrong for real data: anyone who knows a participant's phone number
+could sign in as them.
+
+So the preview runs with demo data only. Not one real name, phone number,
+case number or address. Before real people, `MC_DEMO=0`, and then the list
+below.
 
 ## Preview on Fly.io
 
@@ -71,9 +83,10 @@ and the review queue pick it up.
 
 In order, because each one depends on the last:
 
-1. **Sign-in.** Staff: email plus MFA. Participants: phone number plus a code,
-   then a passkey on the device. Cognito is already in the CDK stack; the work
-   is the screens, the token handling, and replacing the role switcher.
+1. **Turn the demo helpers off** (`MC_DEMO=0`) and wire code delivery to SMS
+   (Twilio or SNS) so a participant on a new phone is not stuck waiting for
+   an officer. Passkeys after that, which is also the device binding the
+   Big Picture doc asks for.
 2. **Postgres, not SQLite**, with the app connecting as a non-superuser role
    that sets `app.county_id` per request, so the row-level security in
    migration 002 actually does something. Plus automated backups, and a

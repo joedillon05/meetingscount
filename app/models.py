@@ -149,6 +149,19 @@ class User(Base):
     # saw. A new CONSENT_VERSION asks everyone again.
     consented_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     consent_version: Mapped[str | None] = mapped_column(String(16))
+
+    # Sign-in. Staff use a password and, if they turn it on, an authenticator
+    # app. Participants use their phone number and a one-time code, so there
+    # is no password to lose. Hashes only; see app/security.py.
+    password_hash: Mapped[str | None] = mapped_column(String(200))
+    password_set_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    totp_secret: Mapped[str | None] = mapped_column(String(64))
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     participant: Mapped[Participant | None] = relationship(
@@ -291,6 +304,49 @@ class Dispute(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class Session(Base):
+    """
+    One signed-in browser. The cookie holds a random token; only its hash is
+    stored, so a database dump does not let anyone sign in as a person.
+    Revocable, and every row says which device and address it came from.
+    """
+    __tablename__ = "sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+    user: Mapped[User] = relationship()
+
+
+class LoginCode(Base):
+    """
+    A one-time code for a participant to sign in with. Hashed with a server
+    key, single use, short lived, and thrown away after a few wrong guesses.
+    Until SMS is wired up, an officer reads the code out and `issued_by_id`
+    records who did.
+    """
+    __tablename__ = "login_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    delivered_via: Mapped[str] = mapped_column(String(16), default="officer")
+
+    @property
+    def live(self) -> bool:
+        return self.used_at is None and self.attempts < 5 and self.expires_at > utcnow()
 
 
 class AuditLog(Base):

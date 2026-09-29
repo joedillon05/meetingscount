@@ -1,13 +1,18 @@
 """
 Authentication and authorization.
 
-Two modes, chosen by MC_DEV_AUTH:
+Who is calling, in this order:
 
-  dev  (default)  The client sends `X-MC-User: <user id>`. No password. This is
-                  what the role switcher in the dashboard uses. Never in prod.
-  prod            A Cognito-issued JWT in `Authorization: Bearer <token>`,
-                  verified against the pool's JWKS, mapped to a User row by
-                  the `sub` claim.
+  1. A session cookie, set by signing in (staff with a password, participants
+     with a one-time code). This is how the real app works.
+  2. `X-MC-User: <id>` when MC_DEV_AUTH is on. Local development only: it is
+     what the demo person-switcher uses, and it is off in any deployment.
+  3. A Cognito JWT in `Authorization: Bearer`, if a county brings their own
+     identity provider later.
+
+Staff sessions are short and expire while idle; a participant's phone stays
+signed in, because making someone re-enter a code in a basement with no
+signal is how check-ins get missed.
 
 `require(*roles)` is the dependency every protected route uses, and
 `scope_to_county()` is what keeps one county out of another's data.
@@ -21,9 +26,12 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timedelta, timezone
+
 from .config import settings
 from .db import get_db
-from .models import AuditLog, Role, User
+from .models import AuditLog, Role, Session as SessionRow, User
+from .security import new_session_token, token_hash
 
 _jwks_cache: dict = {"keys": None, "fetched": 0.0}
 
@@ -55,27 +63,107 @@ def _cognito_claims(token: str) -> dict:
         raise HTTPException(401, f"invalid token: {exc}") from exc
 
 
+def session_user(request: Request, db: Session) -> User | None:
+    """
+    The signed-in user for this request's cookie, or None. Also enforces the
+    idle timeout for staff and keeps `last_seen_at` fresh.
+    """
+    token = request.cookies.get(settings.COOKIE_NAME)
+    if not token:
+        return None
+    row = db.scalar(select(SessionRow).where(SessionRow.token_hash == token_hash(token)))
+    now = datetime.now(timezone.utc)
+    if not row or row.revoked_at or row.expires_at <= now:
+        return None
+    user = db.get(User, row.user_id)
+    if not user or not user.active:
+        return None
+    if user.role != Role.participant:
+        idle = timedelta(minutes=settings.STAFF_IDLE_MINUTES)
+        if now - row.last_seen_at > idle:
+            row.revoked_at = now
+            db.commit()
+            return None
+    # Cheap write, once a minute at most, so a busy screen is not a write storm.
+    if now - row.last_seen_at > timedelta(minutes=1):
+        row.last_seen_at = now
+        db.commit()
+    request.state.session_id = row.id
+    return user
+
+
 def current_user(
     request: Request,
     db: Session = Depends(get_db),
     x_mc_user: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> User:
-    if settings.DEV_AUTH:
-        if not x_mc_user:
-            raise HTTPException(401, "send X-MC-User (dev auth is on)")
+    user = session_user(request, db)
+    if user:
+        return user
+
+    if settings.DEV_AUTH and x_mc_user:
         user = db.get(User, int(x_mc_user))
         if not user or not user.active:
             raise HTTPException(401, "unknown user")
         return user
 
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "missing bearer token")
-    claims = _cognito_claims(authorization.split(" ", 1)[1])
-    user = db.scalar(select(User).where(User.cognito_sub == claims["sub"]))
-    if not user or not user.active:
-        raise HTTPException(401, "no active account for this identity")
-    return user
+    if authorization and authorization.lower().startswith("bearer ") and settings.COGNITO_USER_POOL_ID:
+        claims = _cognito_claims(authorization.split(" ", 1)[1])
+        user = db.scalar(select(User).where(User.cognito_sub == claims["sub"]))
+        if not user or not user.active:
+            raise HTTPException(401, "no active account for this identity")
+        return user
+
+    raise HTTPException(401, "sign in to continue")
+
+
+def start_session(db: Session, user: User, request: Request) -> tuple[str, datetime]:
+    """A new session for a browser. Returns the cookie value and its expiry."""
+    token, hashed = new_session_token()
+    now = datetime.now(timezone.utc)
+    life = (timedelta(days=settings.PARTICIPANT_SESSION_DAYS)
+            if user.role == Role.participant else timedelta(hours=settings.STAFF_SESSION_HOURS))
+    db.add(SessionRow(user_id=user.id, token_hash=hashed, created_at=now, last_seen_at=now,
+                      expires_at=now + life, ip=client_ip(request),
+                      user_agent=(request.headers.get("user-agent") or "")[:300]))
+    user.last_login_at = now
+    user.failed_logins = 0
+    user.locked_until = None
+    db.commit()
+    return token, now + life
+
+
+def end_session(db: Session, request: Request) -> None:
+    token = request.cookies.get(settings.COOKIE_NAME)
+    if not token:
+        return
+    row = db.scalar(select(SessionRow).where(SessionRow.token_hash == token_hash(token)))
+    if row and not row.revoked_at:
+        row.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+
+
+def end_all_sessions(db: Session, user: User) -> int:
+    """Sign a person out everywhere: after a password change, or on request."""
+    now = datetime.now(timezone.utc)
+    rows = db.scalars(select(SessionRow).where(SessionRow.user_id == user.id,
+                                               SessionRow.revoked_at.is_(None))).all()
+    for row in rows:
+        row.revoked_at = now
+    db.commit()
+    return len(rows)
+
+
+def set_session_cookie(response, token: str, expires: datetime, secure: bool) -> None:
+    response.set_cookie(
+        settings.COOKIE_NAME, token, httponly=True, secure=secure, samesite="lax",
+        path="/", max_age=int((expires - datetime.now(timezone.utc)).total_seconds()))
+
+
+def clear_session_cookie(response, secure: bool) -> None:
+    response.delete_cookie(settings.COOKIE_NAME, path="/", httponly=True,
+                           secure=secure, samesite="lax")
 
 
 def require(*roles: Role) -> Callable:
