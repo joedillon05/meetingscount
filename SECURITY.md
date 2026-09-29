@@ -62,7 +62,9 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 - `Content-Security-Policy` allows scripts and styles from this origin only.
   Map tiles are the one outside source, images only.
 - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: same-origin`, and a `Permissions-Policy` that allows
+  `Referrer-Policy: strict-origin-when-cross-origin` (other hosts see the
+  site's origin, never a path; the map tile server needs at least that or it
+  blocks the request), and a `Permissions-Policy` that allows
   geolocation for this site and switches off camera, microphone and payment.
 - The interactive API browser is switched off when `MC_ENV=production`.
 - Container runs as a non-root user (uid 10001).

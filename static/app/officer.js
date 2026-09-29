@@ -614,7 +614,7 @@ function drawMeetingsMap(meetings) {
   if (!L) return;
   S.mmap = L.map('mmap', { scrollWheelZoom: false }).setView([42.28, -83.74], 11);
   S.mmap.attributionControl.setPrefix(false);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(S.mmap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(S.mmap);
   const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
   const group = L.featureGroup().addTo(S.mmap);
   meetings.forEach(m => {

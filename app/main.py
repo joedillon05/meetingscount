@@ -73,7 +73,7 @@ app = FastAPI(
 # this origin only, so an injected <script src> has nowhere to load from.
 # Map tiles are the one outside source, and only images.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-       "img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'; "
+       "img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; "
        "font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
        "form-action 'self'")
 
@@ -91,7 +91,10 @@ async def security_headers(request, call_next):
     """
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "same-origin")
+    # Not "same-origin": that strips the Referer from map tile requests, and
+    # OpenStreetMap serves a 403 "Access blocked" tile to browsers that arrive
+    # with no Referer. This sends only the origin to other hosts, never a path.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault(
         "Permissions-Policy", "geolocation=(self), camera=(), microphone=(), payment=()")

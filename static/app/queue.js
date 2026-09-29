@@ -644,7 +644,7 @@ function drawMap(d) {
   const c = n => cs.getPropertyValue(n).trim();
   Q.map = L.map(box, { scrollWheelZoom: false, zoomControl: true });
   Q.map.attributionControl.setPrefix(false);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(Q.map);
   const m = d.meeting, layers = [];
   L.circle([m.lat, m.lng], { radius: m.radius_ft / 3.28084, color: c('--ink'), weight: 1.5, dashArray: '5 5', fillOpacity: 0.04 }).addTo(Q.map);
