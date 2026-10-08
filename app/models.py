@@ -94,6 +94,12 @@ class RequirementPeriod(str, enum.Enum):
     month = "month"
 
 
+class ConfirmationStatus(str, enum.Enum):
+    asked = "asked"              # text sent, no answer yet
+    confirmed = "confirmed"      # they said they saw the participant there
+    declined = "declined"        # they said they could not confirm it
+
+
 # --------------------------------------------------------------------------- #
 # Tenancy
 # --------------------------------------------------------------------------- #
@@ -303,6 +309,91 @@ class Dispute(Base):
     checkin_id: Mapped[int] = mapped_column(ForeignKey("checkins.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class Confirmer(Base):
+    """
+    Someone a participant can ask to confirm they were at a meeting: a
+    sponsor, the chair, a counsellor. Chosen by the participant and saved so
+    the next ask is one tap. Seen only by the participant, and by an officer
+    reviewing a check-in this person answered for.
+    """
+    __tablename__ = "confirmers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[str] = mapped_column(String(32))
+    relationship: Mapped[str] = mapped_column(String(32), default="other")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class Confirmation(Base):
+    """
+    One ask: a text to one person about one check-in, and what they answered.
+    The link in the text carries a random token and only its hash is stored,
+    the same as a session. Who was asked is copied onto the row so the record
+    stays whole if the saved contact is removed later.
+    """
+    __tablename__ = "confirmations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    checkin_id: Mapped[int] = mapped_column(ForeignKey("checkins.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    confirmer_id: Mapped[int | None] = mapped_column(ForeignKey("confirmers.id"))
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[str] = mapped_column(String(32))
+    relationship: Mapped[str] = mapped_column(String(32), default="other")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    asked_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    status: Mapped[ConfirmationStatus] = mapped_column(Enum(ConfirmationStatus),
+                                                        default=ConfirmationStatus.asked)
+    answered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    answered_via: Mapped[str | None] = mapped_column(String(16))     # link | text
+    answer_note: Mapped[str | None] = mapped_column(String(400))
+    answer_ip: Mapped[str | None] = mapped_column(String(64))
+
+    @property
+    def open(self) -> bool:
+        """Still waiting for an answer, and the link still works."""
+        return self.status == ConfirmationStatus.asked and self.expires_at > utcnow()
+
+    @property
+    def state(self) -> str:
+        """asked | confirmed | declined | expired, for screens and reports."""
+        if self.status == ConfirmationStatus.asked and self.expires_at <= utcnow():
+            return "expired"
+        return self.status.value
+
+
+class SmsLog(Base):
+    """
+    Every text the system tried to send and what came of it. The body is kept
+    with any link token blanked out. See app/sms.py.
+    """
+    __tablename__ = "sms_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    to_phone: Mapped[str] = mapped_column(String(32), index=True)
+    purpose: Mapped[str] = mapped_column(String(32))      # login_code, ask, receipt, answer, welcome
+    body: Mapped[str] = mapped_column(String(600))
+    status: Mapped[str] = mapped_column(String(16))       # queued, sent, delivered, failed, skipped
+    provider_sid: Mapped[str | None] = mapped_column(String(64), index=True)
+    error: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class SmsOptOut(Base):
+    """A number that replied STOP, or that Twilio refused as unsubscribed. Never texted."""
+    __tablename__ = "sms_opt_outs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(32), unique=True)
+    source: Mapped[str] = mapped_column(String(16), default="reply")   # reply | provider
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

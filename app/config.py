@@ -50,7 +50,7 @@ class Settings:
 
     # The wording of the participant consent screen. Bump it when the text
     # changes in a way people should agree to again.
-    CONSENT_VERSION: str = "2026-09"
+    CONSENT_VERSION: str = "2026-10"
 
     # One shared password in front of a preview deployment, so a demo on a
     # public URL is not a public demo. This is a door lock, not a sign-in:
@@ -73,6 +73,27 @@ class Settings:
     LOGIN_CODE_MINUTES: int = int(os.environ.get("MC_LOGIN_CODE_MINUTES", "60"))
 
     COOKIE_NAME: str = "mc_session"
+
+    # Text messages go through Twilio. Unset means nothing is sent: sign-in
+    # codes are read out by an officer, and in demo mode a confirmation link
+    # shows on screen instead of going to anyone's phone. MC_TWILIO_FROM is
+    # the number to send from, or a Messaging Service SID (MG...).
+    TWILIO_ACCOUNT_SID: str = os.environ.get("MC_TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN: str = os.environ.get("MC_TWILIO_AUTH_TOKEN", "")
+    TWILIO_FROM: str = os.environ.get("MC_TWILIO_FROM", "")
+
+    # Where links in texts point, with no trailing slash. A confirmation link
+    # has to open on somebody else's phone, so it needs the public address.
+    # Empty means links are built from the request that caused them, which
+    # is right for local development and wrong behind a proxy.
+    PUBLIC_URL: str = os.environ.get("MC_PUBLIC_URL", "").rstrip("/")
+
+    # How long a confirmation link stays usable.
+    CONFIRM_LINK_DAYS: int = int(os.environ.get("MC_CONFIRM_LINK_DAYS", "7"))
+
+    @property
+    def sms_configured(self) -> bool:
+        return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and self.TWILIO_FROM)
 
     @property
     def secret_key_bytes(self) -> bytes:

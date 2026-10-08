@@ -185,6 +185,7 @@ function renderTab() {
   if (!v) return;
   if (!S.loaded) { v.innerHTML = S.loadError ? errorCard(S.loadError) : skeleton(); return; }
   v.innerHTML = { today: viewToday, history: viewHistory, you: viewYou }[S.tab]();
+  if (S.tab === 'you') loadPeople();
 }
 
 const firstName = n => String(n || '').split(' ')[0];
@@ -642,14 +643,176 @@ async function checkOut(id) {
     body = { lat: pos.coords.latitude, lng: pos.coords.longitude };
   } catch { /* check out without a location rather than not at all */ }
   try {
-    await api(`/api/checkins/${id}/checkout`, { method: 'POST', body: JSON.stringify(body) });
-    sh.close();
-    toast(body.lat ? 'Checked out.' : 'Checked out, without a location reading.');
-    refresh();
+    const done = await api(`/api/checkins/${id}/checkout`, { method: 'POST', body: JSON.stringify(body) });
+    if (!body.lat) toast('Checked out, without a location reading.');
+    await refresh();
+    if (!canAsk() || !done.meeting?.counts) { sh.close(); toast('Checked out.'); return; }
+    askStep(sh, id, { afterCheckout: true });
   } catch (e) {
     sh.set(`<div class="step"><div class="hero-ic warn">${icon('alert')}</div><h2>Could not check out</h2>
       <p>${esc(e.message)}</p><button class="btn block" data-close type="button">OK</button></div>`);
   }
+}
+
+/* ---------- asking someone who was there ----------
+   A sponsor, the chair, a counselor. They get one text with a link, and
+   their answer sits on the check-in for the participant and the officer. */
+
+const RELATIONSHIPS = [['sponsor', 'Sponsor'], ['chair', 'Meeting chair'], ['counselor', 'Counselor'],
+  ['family', 'Family'], ['friend', 'Friend'], ['other', 'Someone else who was there']];
+const VOUCH = {
+  confirmed: { tone: 'ok', icon: 'check' }, declined: { tone: 'bad', icon: 'x' },
+  asked: { tone: 'warn', icon: 'clock' }, expired: { tone: 'neutral', icon: 'clock' },
+};
+
+/* Texting has to be switched on, or this is a demo where the link shows on screen. */
+function canAsk() { return !!(S.ctx.texting || S.ctx.demo); }
+
+function askable(c) {
+  const xs = c.confirmations || [];
+  return canAsk() && c.meeting.counts && c.status !== 'rejected' && !xs.some(x => x.state === 'asked')
+    && xs.length < 3 && Date.now() - new Date(c.checked_in_at) < 7 * 864e5;
+}
+
+function askSheet(id) {
+  const sh = sheet('', { label: 'Ask someone to confirm' });
+  askStep(sh, id);
+}
+
+async function askStep(sh, id, { afterCheckout = false } = {}) {
+  let people = [];
+  try { people = await api('/api/my/confirmers'); } catch { people = []; }
+  const c = S.mine.find(x => x.id === id);
+  const xs = (c?.confirmations || []).filter(x => x.state !== 'expired');
+  const waiting = xs.filter(x => x.state === 'asked');
+  const answered = xs.filter(x => x.state === 'confirmed');
+  // Anyone already asked about this check-in is not offered again.
+  people = people.filter(k => !xs.some(x => x.confirmer_id === k.id));
+  sh.set(`<div class="step left ask">
+    ${afterCheckout ? `<div class="hero-ic tone-ok">${icon('check')}</div><h2>Checked out</h2>` : '<h2>Ask someone to confirm</h2>'}
+    <p>Ask someone who was there to confirm it. They get one text with a link. It shows your first name and the meeting, nothing else.</p>
+    ${answered.length ? `<p class="callout ok">${icon('check')} ${esc(answered.map(x => firstName(x.name)).join(' and '))} already confirmed this one.</p>` : ''}
+    ${waiting.length ? `<p class="callout">${icon('clock')} You already asked ${esc(waiting.map(x => firstName(x.name)).join(' and '))}. Waiting for their answer.</p>` : ''}
+    <ul class="pick people" id="askPeople">
+      ${people.map(k => `<li><button class="pick-row" data-k="${k.id}" type="button"><b>${esc(k.name)}</b>
+        <span class="muted small">${esc(k.relationship_words)} · ${esc(k.phone)}</span></button></li>`).join('')}
+      <li><button class="pick-row" data-k="new" type="button"><b>${people.length ? 'Someone else' : 'Add someone'}</b>
+        <span class="muted small">Their name and mobile number</span></button></li>
+    </ul>
+    <form id="askNew" class="ask-form" hidden>
+      <label for="ak-name">Their name</label>
+      <input id="ak-name" maxlength="120" autocomplete="off" placeholder="Kim">
+      <label for="ak-phone">Their mobile number</label>
+      <input id="ak-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="(734) 555-0142">
+      <label for="ak-rel">They are your</label>
+      <select id="ak-rel">${RELATIONSHIPS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <label class="check"><input id="ak-save" type="checkbox" checked> Remember them for next time</label>
+      <button class="btn block" type="submit">Send the text</button>
+    </form>
+    <button class="btn block ghost" data-close type="button">${afterCheckout ? 'Not this time' : 'Cancel'}</button>
+  </div>`);
+  const body = sh.body;
+  body.querySelector('#askPeople').onclick = e => {
+    const b = e.target.closest('[data-k]');
+    if (!b) return;
+    if (b.dataset.k === 'new') {
+      body.querySelector('#askPeople').hidden = true;
+      const f = body.querySelector('#askNew');
+      f.hidden = false;
+      f.querySelector('#ak-name').focus();
+      return;
+    }
+    sendAsk(sh, id, { confirmer_id: Number(b.dataset.k) }, b.querySelector('b').textContent);
+  };
+  body.querySelector('#askNew').onsubmit = e => {
+    e.preventDefault();
+    const f = e.target;
+    sendAsk(sh, id, {
+      name: f.querySelector('#ak-name').value.trim(), phone: f.querySelector('#ak-phone').value.trim(),
+      relationship: f.querySelector('#ak-rel').value, save: f.querySelector('#ak-save').checked,
+    }, f.querySelector('#ak-name').value.trim());
+  };
+}
+
+async function sendAsk(sh, id, payload, name) {
+  sh.body.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  let r;
+  try {
+    r = await api(`/api/checkins/${id}/confirmation`, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (e) {
+    sh.body.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    toast(e.message);
+    return;
+  }
+  const who = esc(firstName(r.name || name));
+  sh.set(`<div class="step"><div class="hero-ic tone-ok">${icon('inbox')}</div>
+    <h2>We texted ${who}</h2>
+    <p>You will get a text when they answer. It shows on this check-in too. The link works for 7 days.</p>
+    ${r.demo_link ? `<p class="callout ok small">${icon('note')}<span>Demo: the text to ${who} would carry this link.<br>
+      <a href="${esc(r.demo_link)}" target="_blank" rel="noopener">Open it as ${who}</a></span></p>` : ''}
+    <button class="btn block" data-close type="button">Done</button></div>`);
+  refresh();
+}
+
+/* What people said about a check-in, and the button to ask, for the detail sheet. */
+function vouchBlock(c) {
+  const xs = c.confirmations || [];
+  const can = askable(c);
+  if (!xs.length && !can) return '';
+  const said = x => {
+    if (x.state === 'confirmed') return `confirmed it, ${esc(relativeDay(x.answered_at).toLowerCase())} at ${time(x.answered_at)}.`;
+    if (x.state === 'declined') return 'could not confirm it.';
+    if (x.state === 'asked') return `was asked ${esc(relativeDay(x.asked_at).toLowerCase())}. No answer yet.`;
+    return 'was asked and did not answer.';
+  };
+  return `<h3 class="sub">Someone who was there</h3>
+    ${xs.map(x => `<p class="vouch tone-${VOUCH[x.state].tone}">${icon(VOUCH[x.state].icon)}
+      <span><b>${esc(x.name)}</b> (${esc(x.relationship_words)}) ${said(x)}${x.answer_note ? `<br><span class="muted small">"${esc(x.answer_note)}"</span>` : ''}</span></p>`).join('')}
+    ${can ? `<button class="btn secondary block" data-act="ask" data-id="${c.id}" type="button">${icon('inbox')} Ask someone to confirm</button>` : ''}`;
+}
+
+/* The You tab: the people a participant keeps on their list. */
+async function loadPeople() {
+  const ul = $('#peopleList');
+  if (!ul) return;
+  let people = [];
+  try { people = await api('/api/my/confirmers'); } catch { ul.innerHTML = '<li class="muted small">Could not load your list.</li>'; return; }
+  ul.innerHTML = people.length ? people.map(k => `<li><span class="who"><b>${esc(k.name)}</b>
+      <span class="muted small">${esc(k.relationship_words)} · ${esc(k.phone)}</span></span>
+      <button class="linkish small" data-act="removeperson" data-id="${k.id}" type="button">Remove</button></li>`).join('')
+    : '<li class="muted small">Nobody yet. You can also add someone when you check out.</li>';
+}
+
+function addPersonSheet() {
+  const sh = sheet(`<form class="step left ask-form" id="addPerson">
+    <h2>Add someone</h2>
+    <p class="muted">When you ask them, they get one text with a link. They see your first name and the meeting, nothing else.</p>
+    <label for="ap-name">Their name</label>
+    <input id="ap-name" maxlength="120" autocomplete="off" placeholder="Kim" required>
+    <label for="ap-phone">Their mobile number</label>
+    <input id="ap-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="(734) 555-0142" required>
+    <label for="ap-rel">They are your</label>
+    <select id="ap-rel">${RELATIONSHIPS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+    <button class="btn block" type="submit">Save</button>
+  </form>`, { label: 'Add someone' });
+  sh.body.querySelector('#ap-name').focus();
+  sh.body.querySelector('#addPerson').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('/api/my/confirmers', { method: 'POST', body: JSON.stringify({
+        name: f.querySelector('#ap-name').value.trim(), phone: f.querySelector('#ap-phone').value.trim(),
+        relationship: f.querySelector('#ap-rel').value }) });
+      sh.close();
+      toast('Saved.');
+      loadPeople();
+    } catch (err) { toast(err.message); }
+  };
+}
+
+async function removePerson(id) {
+  try { await api(`/api/my/confirmers/${id}`, { method: 'DELETE' }); loadPeople(); }
+  catch (e) { toast(e.message); }
 }
 
 /* ---------- personal meetings ---------- */
@@ -721,7 +884,8 @@ function histRow(c) {
   return `<li><button class="hist-row" data-act="detail" data-id="${c.id}" type="button">
     <span class="dot tone-${s.tone}">${icon(s.icon)}</span>
     <span class="h-main"><b>${esc(c.meeting.name)}</b>
-      <span class="muted small">${esc(relativeDay(c.checked_in_at))}, ${time(c.checked_in_at)}${c.meeting.counts ? '' : ' · only you'}</span></span>
+      <span class="muted small">${esc(relativeDay(c.checked_in_at))}, ${time(c.checked_in_at)}${c.meeting.counts ? '' : ' · only you'}${
+        c.confirmed_by?.state === 'confirmed' ? ` · ${esc(firstName(c.confirmed_by.name))} confirmed` : ''}</span></span>
     <span class="h-state tone-${s.tone}">${esc(s.label)}</span>
     ${icon('arrow', 'muted chev')}
   </button></li>`;
@@ -731,6 +895,14 @@ function detail(id) {
   if (!S.mine.some(x => x.id === id)) return;
   const sh = sheet(detailHtml(id), { label: 'Check-in details' });
   wireDetail(sh, id);
+  // An answer from someone asked may have come in since the last load.
+  const before = JSON.stringify(S.mine.find(x => x.id === id));
+  refresh().then(() => {
+    if (!sh.el.open || JSON.stringify(S.mine.find(x => x.id === id)) === before) return;
+    const draft = sh.body.querySelector('textarea')?.value;
+    sh.set(detailHtml(id)); wireDetail(sh, id);
+    if (draft) sh.body.querySelector('textarea').value = draft;
+  });
 }
 
 /* After a note is sent, reload and redraw in place, so the thread shows it. */
@@ -760,6 +932,7 @@ function detailHtml(id) {
 
     ${thread(c)}
     ${canNote ? noteForm(c, asked) : ''}
+    ${vouchBlock(c)}
 
     ${c.pin_purged ? `<p class="callout">${icon('trash')} The exact location was deleted after ${S.me.policy.pin_retention_days} days, as promised. The result stays.</p>` : diagram(c)}
 
@@ -816,6 +989,13 @@ function viewYou() {
       </ul>
       ${me.consent.accepted_at ? `<p class="fine">You agreed to this on ${esc(day(me.consent.accepted_at))}.</p>` : ''}
     </section>
+
+    ${canAsk() ? `<section class="card" aria-labelledby="h-people">
+      <h2 class="sec flush" id="h-people">${icon('users')} People who can confirm you were there</h2>
+      <p class="small muted">A sponsor, a chair, a counselor. When you ask, they get one text with a link. They see your first name and the meeting, nothing else.</p>
+      <ul class="plain people-list" id="peopleList"><li class="muted small">Loading</li></ul>
+      <button class="btn secondary block" data-act="addperson" type="button">${icon('plus')} Add someone</button>
+    </section>` : ''}
 
     <button class="link-row" data-act="export" type="button">${icon('download')}
       <span><b>Download my record</b><br><span class="muted small">Every check-in, reason and note, as a file you keep.</span></span>${icon('arrow', 'muted')}</button>
@@ -896,6 +1076,8 @@ function renderConsent() {
         <p>Exact locations are deleted after ${pol.pin_retention_days} days. The result (confirmed or not, distance, time) stays with your case for up to ${plural(years, 'year')}${me.county ? `, under ${esc(me.county)} policy` : ''}.</p></div></li>
       <li>${icon('shield')}<div><b>You can see and question everything</b>
         <p>Every result comes with its reasons. You can add a note to any of them, and a person reviews anything unclear before it affects you.</p></div></li>
+      <li>${icon('inbox')}<div><b>Texts, only about your check-ins</b>
+        <p>A sign-in code when you ask for one, and a text when someone you chose confirms you were at a meeting. Reply STOP to any of them to stop.</p></div></li>
     </ol>
     <button class="btn block big" id="agree" type="button">I understand, continue</button>
     <p class="fine center">You can reread this any time under <b>You</b>. ${S.devUsers ? `<button class="linkish" data-act="switch" type="button">Demo: switch participant</button>` : ''}</p>
@@ -955,7 +1137,7 @@ function renderCodeStep(phone, sent) {
     <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
     <h1>Enter your code</h1>
     <p class="lead">${sent.delivered
-      ? `We sent a six-digit code to ${esc(phone)}.`
+      ? esc(sent.message || `We sent a six-digit code to ${phone}.`)
       : `Your officer can read you a six-digit code. It works for ${sent.minutes || 60} minutes.`}</p>
     ${sent.demo_code ? `<p class="callout ok">${icon('note')} Demo: your code is <b class="code">${esc(sent.demo_code)}</b></p>` : ''}
     <form id="codeForm" novalidate>
@@ -1026,6 +1208,9 @@ app.addEventListener('click', e => {
     checkout: () => checkOut(id),
     detail: () => detail(id),
     personal: personalMeeting,
+    ask: () => { document.querySelector('dialog[open]')?.close(); askSheet(id); },
+    addperson: addPersonSheet,
+    removeperson: () => removePerson(id),
     export: exportRecord,
     install,
     switch: switchUser,

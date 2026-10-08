@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import compliance
+from .. import compliance, confirming
 from ..auth import audit, require
 from ..db import get_db
 from ..geo import haversine_m, meters_to_feet
@@ -85,7 +85,7 @@ def queue(state: str = "open", mine_only: bool = False, days: int = 14,
         return st.state == tab
 
     counts = {t: sum(1 for c, *_ in rows if in_tab(c, t)) for t in ("open", "waiting", "decided")}
-    items = []
+    items, shown = [], []
     for c, m, u, p in rows:
         if not in_tab(c, state):
             continue
@@ -96,6 +96,8 @@ def queue(state: str = "open", mine_only: bool = False, days: int = 14,
               "notes_count": len(st.notes), "this_week": c.checked_in_at >= week_start,
               "since": _since(c, st).isoformat()}
         items.append(d)
+        shown.append(c)
+    confirming.attach(db, items, shown)
     items.sort(key=lambda d: d["since"], reverse=(state == "decided"))
     audit(db, user, "view_review_queue", detail=f"{state}: {len(items)} items")
     return {"items": items, "counts": counts}
@@ -187,13 +189,17 @@ def item(checkin_id: int, request: Request, db: Session = Depends(get_db),
     st = states_for(db, [c])[c.id]
     tz, now = _tz(db, user), datetime.now(timezone.utc)
 
+    asks = confirming.for_checkins(db, [c]).get(c.id, [])
     d = checkin_out(c, m, include_pin=True)             # reviewing IS the reason for the pin
     d |= {"participant": _participant_out(u, p), "state": st.state, "replied": st.replied,
           "latest": review_out(st.latest) if st.latest else None,
           "since": _since(c, st).isoformat(),
           "checkout": ({"lat": c.checkout_lat, "lng": c.checkout_lng}
                        if c.checkout_lat is not None else None),
-          "timeline": _timeline(c, st),
+          "timeline": _timeline(c, st, asks),
+          "confirmations": [confirming.confirmation_out(x) for x in asks],
+          "confirmed_by": (confirming.confirmation_out(confirming.best(asks))
+                           if asks else None),
           "impact": _impact(db, c, m, p, tz) if p else [],
           "context": {"venue": _venue(db, m, c.user_id),
                       "person": _person(db, p, c.user_id, tz, now) if p else None}}
@@ -202,14 +208,15 @@ def item(checkin_id: int, request: Request, db: Session = Depends(get_db),
     return d
 
 
-def _timeline(c: CheckIn, st) -> list[dict]:
-    """The check-in's life so far, in order: engine verdict, notes, decisions."""
+def _timeline(c: CheckIn, st, asks=()) -> list[dict]:
+    """The check-in's life so far, in order: engine verdict, notes, asks, decisions."""
     ev = [{"kind": "checkin", "at": c.checked_in_at.isoformat(), "status": c.status.value,
            "confidence": c.confidence}]
     if c.checked_out_at:
         ev.append({"kind": "checkout", "at": c.checked_out_at.isoformat()})
     ev += [{"kind": "note", "at": n.created_at.isoformat(), **note_out(n)} for n in st.notes]
     ev += [{"kind": "review", **review_out(r)} for r in st.history]
+    ev += confirming.timeline_events(list(asks))
     return sorted(ev, key=lambda e: e["at"])
 
 

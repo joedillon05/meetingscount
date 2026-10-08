@@ -1,0 +1,21 @@
+/* The page a sponsor opens from a text. One card, two buttons, no chrome. */
+
+.confirm-body { background: var(--bg); color: var(--ink); min-height: 100dvh; }
+.ask-card {
+  max-width: 480px; margin: 0 auto; display: grid; gap: 12px; text-align: left;
+  padding: calc(28px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom));
+}
+.ask-card .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; margin-bottom: 8px; }
+.ask-card .logo { width: 30px; height: 30px; }
+.ask-card h1 { font-size: 28px; line-height: 1.12; letter-spacing: -.025em; font-weight: 780; text-wrap: balance; }
+.ask-card .lead { font-size: 17px; line-height: 1.45; }
+.answers { display: grid; gap: 8px; margin: 10px 0 4px; }
+.answers .btn .ic { width: 20px; height: 20px; }
+.ask-card label { font-size: 14px; font-weight: 600; color: var(--ink-2); margin-top: 6px; }
+.ask-card textarea {
+  width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; min-height: 60px; resize: vertical;
+}
+.ask-card .fine { margin-top: 10px; }
+.ask-card .err { color: var(--bad); font-weight: 600; }
+.ask-card .hero-ic { margin: 10px 0 4px; }

@@ -317,3 +317,7 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var
 .bigcode.small-code { font-size: 26px; letter-spacing: .06em; }
 .grid tr.off td { opacity: .6; }
 td.right { text-align: right; }
+
+/* Someone the participant asked to confirm a check-in, on the record. */
+.vouchline { display: flex; gap: 6px; align-items: flex-start; font-size: 13.5px; color: var(--t, var(--ink-2)); margin-top: 5px; }
+.vouchline .ic { width: 16px; height: 16px; flex: none; margin-top: 2px; }

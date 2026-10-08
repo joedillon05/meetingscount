@@ -180,6 +180,16 @@ function signals(i) {
   return out;
 }
 
+/* Someone the participant asked said yes or no. Worth a tag in the list. */
+function vouchTag(i) {
+  const x = i.confirmed_by;
+  if (!x || (x.state !== 'confirmed' && x.state !== 'declined')) return '';
+  const first = String(x.name).split(' ')[0];
+  return x.state === 'confirmed'
+    ? `<span class="sig ok">${icon('check')} ${esc(first)} said yes</span>`
+    : `<span class="sig bad">${icon('x')} ${esc(first)} said no</span>`;
+}
+
 function renderList() {
   const el = $('#qlist');
   if (!el) return;
@@ -221,6 +231,7 @@ function listItem(i, canPick) {
       <div class="qi-tags">
         ${Q.tab === 'decided' ? '' : signals(i).map(s => `<span class="sig ${s.tone}">${esc(s.text)}</span>`).join('')}
         ${i.replied ? `<span class="sig info">${icon('note')} Replied</span>` : i.notes_count ? `<span class="sig info">${icon('note')} Note</span>` : ''}
+        ${vouchTag(i)}
         ${i.this_week && Q.tab !== 'decided' ? '<span class="sig week">This week</span>' : ''}
       </div>
       ${extra}
@@ -380,8 +391,23 @@ function facts(d) {
       [outD && `${feet(outD.data.distance_ft)} away`, outT && `left ${duration(outT.data.minutes_before_end)} early`].filter(Boolean).join(', ')),
     row('Network', net && !/not configured/.test(net.reason) ? (net.passed ? 'Looks normal' : 'VPN or proxy') : 'Not checked',
       net && !/not configured/.test(net.reason) ? net : null, d.ip ? esc(d.ip) : ''),
+    vouchRow(d, row),
     `<div class="fact info"><dt>Confidence</dt><dd><span class="conf"><i style="width:${d.confidence}%"></i></span><span>${d.confidence} of 100</span></dd></div>`,
   ].join('');
+}
+
+/* What the person the participant asked said, as one more signal. It is
+   evidence from someone the participant chose, so it never decides anything
+   on its own, but an officer should see it next to the GPS. */
+function vouchRow(d, row) {
+  const x = d.confirmed_by;
+  if (!x) return '';
+  const who = `${esc(x.name)}, ${esc(x.relationship_words)}`;
+  const how = x.answered_via === 'text' ? 'by text reply' : 'from the link';
+  if (x.state === 'confirmed') return row('Confirmed by', 'Said yes', { passed: true, score: 1, weight: 1 }, `${who}, ${how}, ${time(x.answered_at)}`);
+  if (x.state === 'declined') return row('Confirmed by', 'Said no', { passed: false, hard: true, weight: 1 }, `${who}, ${how}, ${time(x.answered_at)}`);
+  if (x.state === 'asked') return row('Confirmed by', 'Asked, no answer yet', { passed: false, hard: false, weight: 1 }, who);
+  return row('Confirmed by', 'Asked, did not answer', null, who);
 }
 
 function venueCard(d, first) {
@@ -426,10 +452,14 @@ function timeline(d, first) {
     if (e.kind === 'checkin') return `<b>Checked in.</b> The engine ${e.status === 'flagged' ? 'flagged it' : e.status === 'rejected' ? 'rejected it' : 'confirmed it'} at ${e.confidence} confidence.`;
     if (e.kind === 'checkout') return '<b>Checked out.</b>';
     if (e.kind === 'note') return `<b>${esc(first)} wrote:</b> "${esc(e.message)}"`;
+    if (e.kind === 'asked') return `<b>${esc(first)} asked ${esc(e.name)} (${esc(e.relationship_words)}) to confirm,</b> by text.`;
+    if (e.kind === 'answered') return `<b>${esc(e.name)} ${e.yes ? 'confirmed it' : 'could not confirm it'}</b>${
+      e.via === 'text' ? ', by text reply' : ''}.${e.note ? ` "${esc(e.note)}"` : ''}`;
     const dec = DECISION[e.decision];
     return `<b>${esc(e.by || 'An officer')}: ${dec.verb.toLowerCase()}.</b>${e.note ? ` "${esc(e.note)}"` : ''}`;
   };
-  const tone = e => e.kind === 'review' ? DECISION[e.decision].tone : e.kind === 'note' ? 'note' : 'neutral';
+  const tone = e => e.kind === 'review' ? DECISION[e.decision].tone : e.kind === 'note' ? 'note'
+    : e.kind === 'answered' ? (e.yes ? 'ok' : 'bad') : 'neutral';
   return `<section class="qd-thread"><h3>What has happened</h3><ol class="tl">${d.timeline.map(e =>
     `<li class="t-${tone(e)}"><span class="t-when">${esc(dateTime(e.at))}</span><p>${said(e)}</p></li>`).join('')}</ol></section>`;
 }
@@ -440,6 +470,9 @@ function suggestions(d, first) {
   const s = new Set();
   const failed = new Set(d.reasons.filter(r => !r.passed && r.weight > 0).map(r => r.name));
   const weakGps = failed.has('gps_accuracy') || (d.context.venue.everyone.weak_gps_share || 0) >= 0.2;
+  const vouch = d.confirmed_by;
+  if (vouch?.state === 'confirmed') s.add(['approved', `${vouch.name} (${vouch.relationship_words}) confirmed by text.`]);
+  if (vouch?.state === 'declined') s.add(['denied', `${vouch.name} could not confirm attendance.`]);
   if (weakGps) s.add(['approved', 'Known weak GPS at this venue.']);
   if (d.timeline.some(e => e.kind === 'note')) s.add(['approved', `${first}'s note checks out.`]);
   s.add(['approved', 'Facilitator confirmed attendance.']);

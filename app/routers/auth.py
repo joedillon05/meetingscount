@@ -27,6 +27,7 @@ from ..auth import (
     audit, clear_session_cookie, client_ip, current_user, end_all_sessions, end_session,
     require, set_session_cookie, start_session,
 )
+from .. import confirming, sms
 from ..config import settings
 from ..db import get_db
 from ..models import LoginCode, Participant, Role, User
@@ -80,7 +81,8 @@ def context():
     accounts so a pitch does not start with someone mistyping a password.
     """
     out = {"demo": settings.DEMO, "dev_auth": settings.DEV_AUTH,
-           "staff_password": True, "participant_code": True}
+           "staff_password": True, "participant_code": True,
+           "texting": settings.sms_configured}
     if settings.DEMO:
         out["demo_password"] = DEMO_PASSWORD
     return out
@@ -177,26 +179,38 @@ def issue_first_code(db: Session, person: User, by: User) -> str:
 @router.post("/code/request")
 def request_code(body: CodeRequestIn, request: Request, db: Session = Depends(get_db)):
     """
-    The participant asks for a code. With no SMS provider wired up yet, the
-    code waits for an officer to read out; the officer sees it on the
-    participant's record. The reply never says whether the number is known,
-    so this cannot be used to find out who is on probation.
+    The participant asks for a code. With texting set up, the code goes to
+    the number by text. Without it, the code waits for an officer to read
+    out; the officer sees it on the participant's record. Either way the
+    reply never says whether the number is known, so this cannot be used to
+    find out who is on probation.
     """
     phone = normalize_phone(body.phone)
     ip = client_ip(request) or "unknown"
     if not phone or too_many(f"code:{ip}", 5, 900) or too_many(f"code:{phone}", 5, 3600):
         raise HTTPException(429, "Too many requests. Wait a few minutes, or ask your officer "
                                  "to read you a code.")
+    texting = settings.sms_configured
+    out = ({"delivered": True, "ask_officer": False,
+            "message": f"If that number is on file, a code is on its way to it. It works for "
+                       f"{settings.LOGIN_CODE_MINUTES} minutes."}
+           if texting else
+           {"delivered": False, "ask_officer": True,
+            "message": "Your officer can read you a code. It works for "
+                       f"{settings.LOGIN_CODE_MINUTES} minutes."})
     user = db.scalar(select(User).where(User.phone == phone, User.role == Role.participant,
                                         User.active.is_(True)))
-    out = {"delivered": False, "ask_officer": True,
-           "message": "Your officer can read you a code. It works for "
-                      f"{settings.LOGIN_CODE_MINUTES} minutes."}
     if not user:
         return out                                   # same answer either way
-    code = _issue_code(db, user, by=None, via="requested")
-    audit(db, user, "login_code_requested", target_type="user", target_id=user.id, request=request)
-    if settings.DEMO:
+    code = _issue_code(db, user, by=None, via="text" if texting else "requested")
+    sent = False
+    if texting:
+        row = sms.send(db, user.phone, confirming.code_text(code, settings.LOGIN_CODE_MINUTES),
+                       purpose="login_code", user_id=user.id, county_id=user.county_id)
+        sent = row.status == "sent"
+    audit(db, user, "login_code_requested", target_type="user", target_id=user.id,
+          detail="sent by text" if sent else ("text failed" if texting else None), request=request)
+    if settings.DEMO and not sent:
         out["demo_code"] = code                      # demo deployments only
     return out
 

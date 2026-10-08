@@ -9,15 +9,15 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import compliance
+from .. import compliance, confirming, sms
 from ..auth import audit, current_user
 from ..config import settings
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..models import County, Participant, Program, User
 from ..schemas import ConsentIn
 from .checkins import my_checkins
@@ -69,8 +69,8 @@ def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
 
 
 @router.post("/my/consent")
-def accept_consent(body: ConsentIn, request: Request, db: Session = Depends(get_db),
-                   user: User = Depends(current_user)):
+def accept_consent(body: ConsentIn, request: Request, background: BackgroundTasks,
+                   db: Session = Depends(get_db), user: User = Depends(current_user)):
     if body.version != settings.CONSENT_VERSION:
         raise HTTPException(409, "The consent text has changed. Reload and read it again.")
     user.consented_at = datetime.now(timezone.utc)
@@ -78,7 +78,22 @@ def accept_consent(body: ConsentIn, request: Request, db: Session = Depends(get_
     db.commit()
     audit(db, user, "accept_consent", target_type="user", target_id=user.id,
           detail=f"version {body.version}", request=request)
+    # The consent screen says texts may come. The first one says how to stop
+    # them, once per number, the way carriers expect.
+    if settings.sms_configured and user.phone and not sms.has_sent(db, user.phone, "welcome"):
+        background.add_task(_welcome, user.id)
     return {"accepted_at": user.consented_at.isoformat(), "version": body.version}
+
+
+def _welcome(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        u = db.get(User, user_id)
+        if u and u.phone:
+            sms.send(db, u.phone, confirming.welcome_text(), purpose="welcome", user_id=u.id,
+                     county_id=u.county_id)
+    finally:
+        db.close()
 
 
 @router.get("/my/progress")

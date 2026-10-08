@@ -16,15 +16,16 @@ import math
 import random
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from .config import settings
 from .db import SessionLocal, create_all, engine
 from .geo import feet_to_meters
+from .confirming import expires as link_expires, new_token
 from .models import (
-    AuditLog, Base, CheckIn, CheckInStatus, County, Dispute, Meeting, MeetingCategory,
-    MeetingSource, Participant, Program, Requirement, RequirementPeriod, Review,
-    ReviewDecision, Role, User,
+    AuditLog, Base, CheckIn, CheckInStatus, Confirmation, ConfirmationStatus, Confirmer, County,
+    Dispute, Meeting, MeetingCategory, MeetingSource, Participant, Program, Requirement,
+    RequirementPeriod, Review, ReviewDecision, Role, SmsLog, SmsOptOut, User,
 )
 from .routers.auth import DEMO_PASSWORD
 from .security import hash_password
@@ -71,8 +72,8 @@ def _wipe(db) -> None:
         Base.metadata.drop_all(engine)
         Base.metadata.create_all(engine)
         return
-    for model in (AuditLog, Review, Dispute, CheckIn, Requirement, Meeting,
-                  Participant, User, Program, County):
+    for model in (AuditLog, SmsLog, SmsOptOut, Confirmation, Confirmer, Review, Dispute,
+                  CheckIn, Requirement, Meeting, Participant, User, Program, County):
         db.execute(delete(model))
     db.commit()
 
@@ -221,15 +222,71 @@ def seed(reset: bool = True) -> dict:
                                 "Could not corroborate; participant did not respond.")))
         db.commit()
 
+        # A few people have someone who confirms for them by text, so the
+        # queue, the record and the report show what that looks like.
+        _vouchers(db, county, participants, now)
+
         counts = {
             "counties": 1, "programs": len(programs),
             "staff": 1 + len(officers), "participants": len(participants),
             "meetings": len(meetings), "checkins": db.query(CheckIn).count(),
             "reviews": db.query(Review).count(), "disputes": db.query(Dispute).count(),
+            "confirmations": db.query(Confirmation).count(),
         }
         return counts
     finally:
         db.close()
+
+
+VOUCHERS = {
+    # participant: (who they ask, how they know them)
+    "Marcus Webb": ("Kim Alvarez", "sponsor"),
+    "Jenna Park": ("Pete Walsh", "chair"),
+    "Devon Hargrove": ("Pete Walsh", "chair"),
+    "Aisha Bello": ("Rosa Nguyen", "sponsor"),
+}
+
+
+def _vouchers(db, county: County, participants: list[Participant], now: datetime) -> None:
+    """
+    Saved confirmers and a few asks on recent check-ins: mostly answered yes,
+    one still waiting (Devon's latest), one no (Aisha's second most recent).
+    """
+    for p in participants:
+        who = db.get(User, p.user_id)
+        if who.name not in VOUCHERS:
+            continue
+        name, relationship = VOUCHERS[who.name]
+        k = Confirmer(county_id=county.id, user_id=who.id, name=name,
+                      phone=f"+1734555{200 + p.id:04d}", relationship=relationship)
+        db.add(k)
+        db.flush()
+        # Checked-out ones only: the meeting open right now is left alone, so
+        # the phone demo can be the first to ask.
+        recent = db.scalars(select(CheckIn).where(CheckIn.user_id == who.id,
+                                                  CheckIn.status != CheckInStatus.rejected,
+                                                  CheckIn.checked_out_at.is_not(None))
+                            .order_by(CheckIn.checked_in_at.desc()).limit(3)).all()
+        for i, c in enumerate(recent):
+            asked_at = min(c.checked_out_at, now)
+            _, digest = new_token()
+            x = Confirmation(county_id=county.id, checkin_id=c.id, user_id=who.id,
+                             confirmer_id=k.id, name=name, phone=k.phone,
+                             relationship=relationship, token_hash=digest, asked_at=asked_at,
+                             expires_at=asked_at + (link_expires() - now))
+            if who.name == "Devon Hargrove" and i == 0:
+                pass                                   # still waiting for Pete
+            elif who.name == "Aisha Bello" and i == 1:
+                x.status = ConfirmationStatus.declined
+                x.answered_at = asked_at + timedelta(minutes=40)
+                x.answered_via = "link"
+                x.answer_note = "I was not at that one. Rosa."
+            else:
+                x.status = ConfirmationStatus.confirmed
+                x.answered_at = min(asked_at + timedelta(minutes=rng.randint(4, 50)), now)
+                x.answered_via = "text" if i % 2 else "link"
+            db.add(x)
+    db.commit()
 
 
 def _behave(db, pattern: str, p: Participant, u: User,

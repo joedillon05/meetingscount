@@ -63,6 +63,26 @@ class DisputeIn(BaseModel):
     message: str = Field(min_length=3, max_length=2000)
 
 
+class ConfirmerIn(BaseModel):
+    name: str = Field(max_length=120)
+    phone: str = Field(max_length=32)
+    relationship: str = Field(default="other", max_length=32)
+
+
+class AskIn(BaseModel):
+    """Ask a saved person by id, or a new one by name and number."""
+    confirmer_id: Optional[int] = None
+    name: Optional[str] = Field(default=None, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    relationship: Optional[str] = Field(default=None, max_length=32)
+    save: bool = True
+
+
+class AnswerIn(BaseModel):
+    answer: str = Field(pattern="^(yes|no)$")
+    note: Optional[str] = Field(default=None, max_length=400)
+
+
 class ParticipantIn(BaseModel):
     name: str
     email: Optional[str] = None

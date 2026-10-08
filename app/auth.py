@@ -185,13 +185,15 @@ def client_ip(request: Request) -> str | None:
 
 def audit(db: Session, actor: User | None, action: str, *, target_type: str | None = None,
           target_id: int | None = None, detail: str | None = None,
-          request: Request | None = None) -> None:
+          request: Request | None = None, county_id: int | None = None) -> None:
     """
     Write an audit row. Called on every staff view of a person's record, every
     review decision, and every export. Cheap; do not skip it to save a query.
+    `county_id` is for events with no actor, such as an answer to a text,
+    so the county's admin still sees them.
     """
     db.add(AuditLog(
-        county_id=actor.county_id if actor else None,
+        county_id=actor.county_id if actor else county_id,
         actor_id=actor.id if actor else None,
         actor_name=actor.name if actor else None,
         action=action, target_type=target_type, target_id=target_id, detail=detail,

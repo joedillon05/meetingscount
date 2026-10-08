@@ -12,7 +12,8 @@ Two different things, and the order matters.
 
 Staff sign in with an email and a password, and an authenticator app if they
 turn one on. Participants sign in with their phone number and a six-digit
-code that their officer reads out from the participant's record. Sessions are
+code. With Twilio set up (below) the code goes to them by text; without it,
+their officer reads it out from the participant's record. Sessions are
 cookies: staff sessions last 12 hours and end after 30 idle minutes,
 a participant's phone stays signed in for 30 days.
 
@@ -21,6 +22,45 @@ off in `fly.toml` and must stay off anywhere else.
 
 Set `MC_SECRET_KEY` in any deployment. Without it, a restart invalidates
 sign-in codes people are holding.
+
+## Texts, through Twilio
+
+Two things go by text: sign-in codes, and the ask to a sponsor or chair to
+confirm a check-in (plus a short text back to the participant with the
+answer). Nothing is sent until these are set:
+
+```bash
+fly secrets set MC_TWILIO_ACCOUNT_SID='AC...' MC_TWILIO_AUTH_TOKEN='...' MC_TWILIO_FROM='+1734...'
+```
+
+`MC_TWILIO_FROM` is the number to send from, or a Messaging Service SID
+(`MG...`) if you set one up in Twilio. `MC_PUBLIC_URL` is already in
+`fly.toml`: links in texts are built from it, and so is the check on
+incoming webhooks, so it has to be the address people actually open.
+
+Then, in the Twilio console:
+
+1. **A number that can send to US phones.** A toll-free number needs
+   toll-free verification before carriers pass its texts; a local number
+   needs A2P 10DLC registration. Both are forms about who is sending what to
+   whom. The answers: appointment and attendance confirmations, sent to
+   people who gave their number to the service or were named by someone who
+   did, with STOP honoured.
+2. **Point incoming messages at the app.** On the number (or the Messaging
+   Service), set "A message comes in" to `https://<your app>/api/sms/inbound`,
+   HTTP POST. That is how a reply of YES, NO or STOP reaches the app.
+   Delivery reports arrive at `/api/sms/status` on their own; the app asks
+   for them on every message it sends.
+3. **Turn on Advanced Opt-Out** if you use a Messaging Service, so Twilio
+   answers STOP and HELP itself. The app records STOP as well and never texts
+   that number again, whichever side hears it first.
+
+Both webhooks check Twilio's signature against the auth token and refuse
+anything else. To try it, ask for a sign-in code from the phone app with a
+number you hold, then look at the `sms_log` table or the audit log.
+
+Expect about a cent per message segment and a few dollars a month for the
+number, at Twilio's current prices. A confirmation ask is two segments.
 
 ## Why a preview still cannot hold real people
 
@@ -83,8 +123,8 @@ and the review queue pick it up.
 
 In order, because each one depends on the last:
 
-1. **Turn the demo helpers off** (`MC_DEMO=0`) and wire code delivery to SMS
-   (Twilio or SNS) so a participant on a new phone is not stuck waiting for
+1. **Turn the demo helpers off** (`MC_DEMO=0`) and set up Twilio (above) so
+   codes go by text and a participant on a new phone is not stuck waiting for
    an officer. Passkeys after that, which is also the device binding the
    Big Picture doc asks for.
 2. **Postgres, not SQLite**, with the app connecting as a non-superuser role

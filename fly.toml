@@ -21,6 +21,7 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
   MC_SEED_ON_BOOT = "1"
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"
+  MC_PUBLIC_URL = "https://meetingscount-preview.fly.dev"   # links in texts, webhook checks
 
 [http_service]
   internal_port = 8000

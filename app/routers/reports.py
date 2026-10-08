@@ -17,7 +17,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import compliance
+from .. import compliance, confirming
 from ..auth import audit, require
 from ..db import get_db
 from ..models import CheckIn, County, Meeting, MeetingSource, Participant, Program, Role, User
@@ -43,11 +43,13 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
         .order_by(CheckIn.checked_in_at.asc())
     ).all()
     states = states_for(db, [c for c, _ in rows])
+    asks = confirming.for_checkins(db, [c for c, _ in rows])
 
     lines = []
     for c, m in rows:
         st = states[c.id]
         review = st.latest
+        vouched = confirming.best(asks.get(c.id, []))
         lines.append({
             "date": c.checked_in_at.astimezone(timezone.utc).isoformat(),
             "meeting": m.name, "address": m.address, "category": m.category.value,
@@ -61,6 +63,9 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
             "reviewed_at": review.created_at.isoformat() if review else None,
             "review_note": review.note if review else None,
             "review_words": DECISION_WORDS.get(review.decision.value) if review else None,
+            # Someone the participant asked, and what they said, if anything.
+            "confirmation": confirming.confirmation_out(vouched) if vouched else None,
+            "confirmation_words": confirming.words(vouched, tz),
             # What this check-in did for the requirement, in one word.
             "outcome": OUTCOME[compliance.outcome(c, review.decision if review else None)],
         })

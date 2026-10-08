@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import compliance, reviewing
+from .. import compliance, confirming, reviewing
 from ..auth import audit, end_all_sessions, require, scope_to_county
 from ..config import settings
 from ..db import get_db
@@ -104,6 +104,7 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
         d["review_state"] = st.state
         d["disputes"] = [reviewing.note_out(n) for n in st.notes]
         timeline.append(d)
+    confirming.attach(db, timeline, [c for c, _ in rows])
 
     reqs = []
     for r in p.requirements:

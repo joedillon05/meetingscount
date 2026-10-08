@@ -22,7 +22,7 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 |---|---|---|
 | Staff sign-in | Email and password, hashed with scrypt (16 MB memory cost), never stored or logged in the clear | `app/security.py`, `app/routers/auth.py` |
 | Second factor | Authenticator app (TOTP, RFC 6238), per account, required at sign-in once on | `app/security.py`, account menu |
-| Participant sign-in | Phone number and a six-digit code: single use, one hour, dead after five wrong guesses, stored as a keyed hash | `app/routers/auth.py` |
+| Participant sign-in | Phone number and a six-digit code: single use, one hour, dead after five wrong guesses, stored as a keyed hash. Sent by text when Twilio is set up, otherwise read out by the officer. The reply never says whether a number is known | `app/routers/auth.py` |
 | Brute force | Account locks for 15 minutes after 5 failures; rate limits per address and per account on every sign-in path | `app/security.too_many` |
 | Account enumeration | A wrong password and an unknown email give the same message; asking for a participant code never reveals whether the number is known | `app/routers/auth.py` |
 | Sessions | Random token in an HttpOnly, SameSite, https-only cookie. Only the token's hash is stored, so a database dump cannot be used to sign in | `app/auth.py` |
@@ -43,6 +43,8 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 | Private by default | Meetings a participant records for themselves are visible only to them: not in staff lists, the review queue, reports, or the ops map | `app/routers/meetings.py`, `reviews.py`, `reports.py` |
 | Their own copy | A participant can see every result and reason about them, add a note to any of it, and download the lot as a file | `GET /api/my/export` |
 | Caching | Every API response is `no-store`, so no browser or proxy keeps personal data | `app/main.cache_rules` |
+| Asking someone to confirm | The person asked gets a first name, the meeting and the time, and a single-use link that stops working after 7 days. Only the hash of the link token is stored. Nothing says why the participant keeps track. The participant cannot ask their own number, asks at most three people per check-in, and cannot text a number that said STOP | `app/routers/confirmations.py` |
+| Texts | Every text is logged with the link token blanked out. STOP, whether Twilio hears it or the app does, stops all texts to that number. Twilio's webhooks are checked against the account's signature and refused otherwise | `app/sms.py` |
 
 ## Decisions about people
 
@@ -85,13 +87,19 @@ it is hidden from a reviewer.
    tenancy today.
 3. **Retention runs on demand, not on a schedule.** The job exists and is
    audited; nothing calls it nightly yet.
-4. **Code delivery by SMS** is not wired, so an officer reads a sign-in code
-   out. Fine for a pilot in one office, not for scale.
-5. **Rate limits are per process.** They hold for one machine, which is the
+4. **Texting needs a registered number.** The code is wired to Twilio, but a
+   toll-free number has to pass verification (or a local number A2P
+   registration) before carriers deliver at volume. Until then an officer
+   reads sign-in codes out, which is fine for a pilot in one office.
+5. **A confirmation proves a phone, not a person.** Someone with the
+   sponsor's phone answered. A participant could name a friend. The officer
+   sees who was asked and how the participant described them, which is why
+   it is evidence beside the GPS and not a decision.
+6. **Rate limits are per process.** They hold for one machine, which is the
    whole pilot. More than one needs shared state.
-6. **No independent test.** A penetration test before a pilot, and backups
+7. **No independent test.** A penetration test before a pilot, and backups
    with a restore that has actually been run.
-7. **Demo helpers.** With `MC_DEMO=1` the sign-in screen lists demo accounts
+8. **Demo helpers.** With `MC_DEMO=1` the sign-in screen lists demo accounts
    and shows participant codes. The app refuses to start with it on when
    `MC_ENV=production`, and it must never be on with real data.
 

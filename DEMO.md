@@ -51,6 +51,11 @@ check in to the meeting you made earlier, outside or near a window.
   plain words with a picture of you against the allowed circle.
 - Say what it does not do: location is read at that tap, never in the
   background. There is no map of where anyone has been.
+- Check out, and the app offers to ask someone who was there. Marcus has his
+  sponsor Kim saved. In demo mode the text's link shows on screen: open it as
+  Kim, tap yes, and the answer appears on the phone, in the review queue next
+  to the GPS, and on the report. Say it plainly: it is one more piece of
+  evidence from someone the participant chose, not a decision.
 
 **5. The report (45 seconds).** Back on the participant, **Compliance
 report**, open the printable one. Week by week against the order, then every

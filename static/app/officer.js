@@ -319,10 +319,20 @@ function ptlItem(ev, d) {
       ${ev.checked_out_at ? `checked out ${time(ev.checked_out_at)}` : ev.status === 'rejected' ? 'no check-out needed' : '<span class="warn">no check-out</span>'}
       ${ev.pin_purged ? ' · location deleted by retention' : ''}</p>
     ${failed.length && ev.status !== 'confirmed' ? `<ul class="why">${failed.map(r => `<li>${icon('x')} ${esc(r.reason)}</li>`).join('')}</ul>` : ''}
+    ${vouchLine(ev.confirmed_by)}
     ${ev.disputes.map(n => `<div class="note"><b>${esc(d.name.split(' ')[0])} wrote, ${esc(shortDay(n.created_at))}</b>${esc(n.message)}</div>`).join('')}
     ${ev.reviews.map(r => `<div class="note"><b>${esc(r.by)}, ${esc(shortDay(r.at))}: ${esc({ approved: 'counted it', denied: 'did not count it', more_info: 'asked a question' }[r.decision])}</b>${esc(r.note || '')}</div>`).join('')}
     ${action ? `<div class="ev-act">${action}</div>` : ''}
   </li>`;
+}
+
+/* Someone the participant asked to confirm a check-in, and what they said. */
+function vouchLine(x) {
+  if (!x) return '';
+  const look = { confirmed: ['ok', 'check', 'confirmed by text'], declined: ['bad', 'x', 'could not confirm it'],
+    asked: ['warn', 'clock', 'was asked to confirm, no answer yet'], expired: ['neutral', 'clock', 'was asked to confirm and did not answer'] }[x.state];
+  return `<p class="vouchline tone-${look[0]}">${icon(look[1])} <span>${esc(x.name)} (${esc(x.relationship_words)}) ${look[2]}${
+    x.answered_at ? `, ${esc(dateTime(x.answered_at))}` : ''}${x.answer_note ? `: "${esc(x.answer_note)}"` : ''}</span></p>`;
 }
 
 /* Attendance against the requirement, period by period. Every bar carries its
@@ -807,6 +817,11 @@ const ACTIONS = {
   create_participant: 'Added a participant', create_requirement: 'Added a requirement', delete_requirement: 'Removed a requirement',
   create_meeting: 'Created a meeting', delete_meeting: 'Deleted a meeting', dispute: 'Participant added a note',
   accept_consent: 'Participant accepted consent', export_own_record: 'Participant downloaded their record',
+  confirmation_asked: 'Participant asked someone to confirm a check-in', confirmation_answered: 'Someone answered a confirmation text',
+  sms_opt_out: 'A number opted out of texts', login_code_requested: 'Participant asked for a sign-in code',
+  issue_access_code: 'Issued a sign-in code', sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
+  create_staff: 'Added a staff member', reset_staff_password: 'Reset a staff password', update_staff: 'Changed a staff account',
+  change_password: 'Changed their password', enable_mfa: 'Turned on an authenticator app', disable_mfa: 'Turned off an authenticator app',
 };
 
 async function viewAudit() {

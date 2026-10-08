@@ -19,6 +19,7 @@ uvicorn app.main:app --reload
 |---|---|
 | `/officer` | Probation officer: caseload, review queue, participant records, reports. Admins also get the audit log |
 | `/` | Participant app (installable on a phone): consent, one-tap check-in and check-out, this week's progress, full history with every reason and every officer decision |
+| `/confirm/<token>` | The person a participant asked to confirm a check-in: one link from a text, no sign-in |
 | `/ops` | Developer: map of every check-in, and a simulator that needs no phone |
 | `/docs` | API reference |
 
@@ -106,6 +107,28 @@ stray keystroke cannot count or fail anyone; anything still waiting is sent
 at once if the page closes. Keyboard: `j`/`k` to move, `a`/`d`/`q` to decide,
 `x` to select several for one bulk decision, `?` for the list.
 
+## Confirmation by text
+
+At check-out, a participant can ask someone who was there (a sponsor, the
+chair, a counselor) to confirm it. That person gets one text with a link, or
+they can just reply YES or NO. What they say sits on the check-in: the
+participant sees it, the review queue shows it next to the GPS, and the
+report says who confirmed and when. It is one more piece of evidence, never a
+decision, and the engine's verdict does not change.
+
+The person asked sees a first name, the meeting and the time. Nothing about
+why. The participant chose them, and a participant keeps a short list of
+people under **You** so the next ask is one tap. Never their own number, at
+most three people per check-in, and never a number that has replied STOP.
+
+Texts go through Twilio. Set `MC_TWILIO_ACCOUNT_SID`, `MC_TWILIO_AUTH_TOKEN`,
+`MC_TWILIO_FROM` (a number, or a Messaging Service SID) and `MC_PUBLIC_URL`.
+With those set, sign-in codes go by text as well. Without them nothing is
+sent: codes are read out by an officer, and in demo mode the confirmation
+link shows on the participant's screen so the whole loop can be walked
+through on one laptop. Every text is logged in `sms_log` with the link token
+blanked out. The Twilio side is in `DEPLOY.md`.
+
 ## Compliance
 
 A requirement says "3 public meetings a week from Sep 1 to Dec 31". For each
@@ -141,12 +164,16 @@ app/
   verification.py  the criteria engine
   compliance.py    requirements -> is this person compliant?
   reviewing.py     where each check-in stands with a human; every screen reads it
+  confirming.py    asking someone who was there, and the texts themselves
+  sms.py           Twilio, the text log, opt-outs, webhook signatures
   seed.py          the demo county
   routers/         me (the signed-in person's own record), meetings, checkins,
-                   caseload, reviews, reports, admin
+                   caseload, reviews, reports, admin, confirmations (asks,
+                   the public answer page, Twilio webhooks)
 static/
   officer.html     the staff dashboard shell
   index.html       the participant app shell
+  confirm.html     the page a sponsor opens from a text (app/confirm.js)
   app/             tokens.css + base.css (shared design system), lib.js
                    (shared helpers), participant.*, officer.js + officer.css,
                    queue.js (the review queue)
@@ -177,6 +204,7 @@ code today:
 | Explainable | every verdict stores its reasons; they appear in the UI and in the report |
 | Consent before the first check-in | `routers/me.py` records who agreed to which wording; `checkins.require_consent` refuses a check-in without it |
 | Personal meetings are the participant's alone | staff lists, the review queue, caseload, reports and the ops map all exclude them |
+| The person asked to confirm sees the minimum | `routers/confirmations.py`: a first name, the meeting, the time, and a single-use link. Only the link token's hash is stored |
 | No location to third parties from the phone | the participant result shows a drawn diagram, not map tiles |
 | Personal data never cached | `main.cache_rules`: every `/api/` response is `no-store` |
 
@@ -203,7 +231,8 @@ password is ready to go (`fly.toml`); real participants need sign-in first.
 
 ## What's next
 
-Roughly in order: Cognito wired up, the rotating meeting code (a printed sheet
-with a code that changes every few minutes, which is the cheapest strong
-presence signal available), an IP intelligence provider behind
-`NetworkCriterion`, SMS check-out reminders through SNS, and the deploy.
+Roughly in order: the meeting directory (recurring meetings imported from the
+area lists, and a way to find the ones nearby), the rotating meeting code (a
+printed sheet with a code that changes every few minutes, which is the
+cheapest strong presence signal available), an IP intelligence provider
+behind `NetworkCriterion`, and check-out reminders by text.

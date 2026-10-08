@@ -30,7 +30,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import create_all
-from .routers import admin, auth, caseload, checkins, me, meetings, reports, reviews
+from .routers import (
+    admin, auth, caseload, checkins, confirmations, me, meetings, reports, reviews,
+)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
@@ -79,7 +81,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
-          reviews.router, reports.router, admin.router):
+          reviews.router, reports.router, admin.router, confirmations.router):
     app.include_router(r)
 
 
@@ -171,6 +173,12 @@ def admin_redirect():
 def report_page():
     """The printable attendance report. Takes ?participant=<id>&days=<n>."""
     return FileResponse(os.path.join(STATIC_DIR, "report.html"))
+
+
+@app.get("/confirm/{token}", include_in_schema=False)
+def confirm_page(token: str):
+    """The page a sponsor or chair opens from their text. No sign-in; the token is the key."""
+    return FileResponse(os.path.join(STATIC_DIR, "confirm.html"))
 
 
 @app.get("/sw.js", include_in_schema=False)

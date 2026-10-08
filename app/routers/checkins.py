@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import confirming
 from ..auth import audit, client_ip, current_user
 from ..config import settings
 from ..db import get_db
@@ -149,6 +150,7 @@ def my_checkins(db: Session = Depends(get_db), user: User = Depends(current_user
         d["awaiting_reply"] = st.state == "waiting"
         d["disputes"] = [note_out(n) for n in st.notes]
         out.append(d)
+    confirming.attach(db, out, [c for c, _ in rows])
     return out
 
 
