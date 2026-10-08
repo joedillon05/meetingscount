@@ -129,6 +129,37 @@ link shows on the participant's screen so the whole loop can be walked
 through on one laptop. Every text is logged in `sms_log` with the link token
 blanked out. The Twilio side is in `DEPLOY.md`.
 
+## The meeting directory
+
+Weekly meetings imported from an area's published list, so a participant
+picks a real meeting instead of their officer typing each one in. The
+Southeast Michigan AA list ships with the app in `data/`, 1,331 meetings
+across 128 towns, and goes into the directory on first boot. Any list with a
+header row works:
+
+```bash
+python tools/import_meetings.py data/semi-aa-meetings-2026-01-28.csv
+python tools/import_meetings.py "another area.xlsx" --prune    # retire what the file no longer lists
+```
+
+Columns are matched by name (meeting name, page URL, day, start and end
+times, street, city, zip, latitude, longitude). Rows with no street address
+are skipped: nobody can check in to a Zoom meeting. A meeting is recognised
+next time by its page URL, so re-running a file changes nothing, and a
+corrected row updates the meeting in place. Nothing is ever deleted, because
+check-ins may point at it.
+
+A directory meeting is a `MeetingSeries`: "Thursdays at 7, 306 N Division".
+The week's instances become `Meeting` rows as phones ask for them, so every
+check-in still points at one date, and the compliance maths never hears
+about recurrence. Directory meetings count toward a requirement the same as
+staff-made ones.
+
+On the phone, a participant picks their town once and sees the meetings
+within 25 miles of it, with a search box for the long evenings. Only the town
+is kept, never where the phone was. Officers search the directory from the
+Meetings page.
+
 ## Compliance
 
 A requirement says "3 public meetings a week from Sep 1 to Dec 31". For each
@@ -166,10 +197,14 @@ app/
   reviewing.py     where each check-in stands with a human; every screen reads it
   confirming.py    asking someone who was there, and the texts themselves
   sms.py           Twilio, the text log, opt-outs, webhook signatures
+  directory.py     the meeting directory: importing a list, weekly meetings
+                   into dated ones, what is near a town
   seed.py          the demo county
   routers/         me (the signed-in person's own record), meetings, checkins,
                    caseload, reviews, reports, admin, confirmations (asks,
-                   the public answer page, Twilio webhooks)
+                   the public answer page, Twilio webhooks), directory
+tools/import_meetings.py   bring an area's meeting list into the directory
+data/              the meeting lists that ship with the app
 static/
   officer.html     the staff dashboard shell
   index.html       the participant app shell
@@ -231,8 +266,8 @@ password is ready to go (`fly.toml`); real participants need sign-in first.
 
 ## What's next
 
-Roughly in order: the meeting directory (recurring meetings imported from the
-area lists, and a way to find the ones nearby), the rotating meeting code (a
-printed sheet with a code that changes every few minutes, which is the
-cheapest strong presence signal available), an IP intelligence provider
-behind `NetworkCriterion`, and check-out reminders by text.
+Roughly in order: the rest of the state's meeting lists in the directory,
+the rotating meeting code (a printed sheet with a code that changes every
+few minutes, which is the cheapest strong presence signal available), an IP
+intelligence provider behind `NetworkCriterion`, and check-out reminders by
+text.

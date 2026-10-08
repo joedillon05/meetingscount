@@ -246,8 +246,10 @@ def _venue(db: Session, m: Meeting, user_id: int) -> dict:
     person. Aggregates only: no other participant is identified.
     """
     box = 0.002
+    same_place = (Meeting.county_id == m.county_id) if m.county_id is not None \
+        else Meeting.county_id.is_(None)
     near = db.scalars(select(Meeting).where(
-        Meeting.county_id == m.county_id, Meeting.source != MeetingSource.personal,
+        same_place, Meeting.source != MeetingSource.personal,
         Meeting.lat.between(m.lat - box, m.lat + box),
         Meeting.lng.between(m.lng - box / math.cos(math.radians(m.lat)),
                             m.lng + box / math.cos(math.radians(m.lat))))).all()

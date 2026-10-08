@@ -321,3 +321,9 @@ td.right { text-align: right; }
 /* Someone the participant asked to confirm a check-in, on the record. */
 .vouchline { display: flex; gap: 6px; align-items: flex-start; font-size: 13.5px; color: var(--t, var(--ink-2)); margin-top: 5px; }
 .vouchline .ic { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+
+/* The Meetings page: the county's list above the directory, the form beside them. */
+.mstack { display: grid; gap: 14px; min-width: 0; }
+.dir .toolbar input[type="search"] { min-width: 220px; }
+.dir .toolbar select { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.nowrap { white-space: nowrap; }

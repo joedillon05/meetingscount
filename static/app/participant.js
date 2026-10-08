@@ -18,6 +18,7 @@ const app = $('#app');
 const S = {
   ctx: {}, me: null, devUsers: null, meetings: [], mine: [], progress: null,
   tab: 'today', loaded: false, installPrompt: null,
+  expanded: new Set(), filter: '', places: null,      // the Today lists
 };
 
 /* ---------- words ---------- */
@@ -231,13 +232,23 @@ function standingFor(meetingId) {
   return S.mine.find(c => c.meeting_id === meetingId && c.status !== 'rejected');
 }
 
+/* With the directory switched on, a town has hundreds of meetings a week.
+   Each list shows a few and offers the rest, and a search box narrows them. */
+const SHOW_FIRST = 5;
+
 function viewToday() {
   const now = Date.now();
   const active = activeCheckIn(now);
-  const ms = S.meetings.map(m => ({ ...m, state: liveState(m, now) }))
-    .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  const openNow = ms.filter(m => (m.state === 'open' || m.state === 'late') && m.id !== active?.meeting_id);
-  const later = ms.filter(m => m.state === 'upcoming');
+  const needle = (S.filter || '').trim().toLowerCase();
+  const hit = m => !needle || `${m.name} ${m.address || ''}`.toLowerCase().includes(needle);
+  const ms = S.meetings.map(m => ({ ...m, state: liveState(m, now), miles: milesFromArea(m) }))
+    .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at) || (a.miles ?? 0) - (b.miles ?? 0));
+  // Everything open is open now, so the nearest first. The county's own
+  // meetings carry no distance and stay at the top.
+  const openNow = ms.filter(m => (m.state === 'open' || m.state === 'late') && m.id !== active?.meeting_id && hit(m))
+    .sort((a, b) => (a.miles ?? -1) - (b.miles ?? -1));
+  const later = ms.filter(m => m.state === 'upcoming' && hit(m));
+  const nextUp = ms.find(m => m.state === 'upcoming');
 
   const groups = {};
   later.forEach(m => (groups[dayKey(m.starts_at)] ||= []).push(m));
@@ -251,21 +262,25 @@ function viewToday() {
     ${questionCards()}
     ${active ? activeCard(active) : ''}
     ${progressCard()}
+    ${areaBar()}
+    ${S.meetings.length > 8 || needle ? `<div class="findbox">
+      <input type="search" id="mfilter" placeholder="Find a meeting by name or street" value="${esc(S.filter || '')}" autocomplete="off" aria-label="Find a meeting">
+    </div>` : ''}
 
     <section aria-labelledby="h-open">
       <h2 class="sec" id="h-open">Open for check-in</h2>
-      ${openNow.length ? openNow.map(meetingCard).join('') : `
+      ${openNow.length ? someOf('open', openNow) : `
         <div class="card quiet">${icon('clock', 'muted')}
-          <p>${active ? 'Nothing else is open right now.' : 'Nothing is open right now.'}
-          ${later[0] ? ` Next up: <b>${esc(later[0].name)}</b>, ${esc(inlineDay(later[0].starts_at))} at ${time(later[0].starts_at)}.` : ''}</p>
+          <p>${needle ? 'Nothing open matches that.' : active ? 'Nothing else is open right now.' : 'Nothing is open right now.'}
+          ${!needle && nextUp ? ` Next up: <b>${esc(nextUp.name)}</b>, ${esc(inlineDay(nextUp.starts_at))} at ${time(nextUp.starts_at)}.` : ''}</p>
         </div>`}
     </section>
 
     ${Object.keys(groups).length ? `<section aria-labelledby="h-later">
       <h2 class="sec" id="h-later">Coming up</h2>
       ${Object.entries(groups).map(([k, list]) => `
-        <h3 class="day">${esc(relativeDay(list[0].starts_at))}</h3>
-        ${list.map(meetingCard).join('')}`).join('')}
+        <h3 class="day">${esc(relativeDay(list[0].starts_at))} <span class="muted">· ${plural(list.length, 'meeting')}</span></h3>
+        ${someOf(`day:${k}`, list)}`).join('')}
     </section>` : ''}
 
     <button class="link-row" data-act="personal" type="button">
@@ -273,6 +288,92 @@ function viewToday() {
       <span class="muted small">Therapy or anything not on the list. Only you see these.</span></span>${icon('arrow', 'muted')}
     </button>
   </div>`;
+}
+
+/* The first few of a list, and a button for the rest. */
+function someOf(key, list) {
+  const all = S.expanded.has(key) || list.length <= SHOW_FIRST + 1;
+  const shown = all ? list : list.slice(0, SHOW_FIRST);
+  return shown.map(meetingCard).join('') + (all ? '' :
+    `<button class="btn secondary block more" data-act="more" data-key="${esc(key)}" type="button">Show all ${list.length}</button>`);
+}
+
+/* ---------- the town ----------
+   Nearby means within 25 miles of a town the participant picked once. Only
+   the town is kept: never where the phone was. */
+
+function milesFromArea(m) {
+  const a = S.me.area;
+  if (!a || m.lat == null || !m.series_id) return null;
+  const R = 3958.8, toR = x => x * Math.PI / 180;
+  const dLat = toR(m.lat - a.lat), dLng = toR(m.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(m.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function areaBar() {
+  if (!S.ctx.directory) return '';
+  const a = S.me.area;
+  if (a) {
+    return `<div class="area"><span>${icon('map')} Meetings near <b>${esc(a.label)}</b></span>
+      <button class="linkish" data-act="area" type="button">Change</button></div>`;
+  }
+  return `<button class="link-row" data-act="area" type="button">${icon('map')}
+    <span><b>Find meetings near you</b><br><span class="muted small">Pick your town once. Meetings within 25 miles of it show up here.</span></span>${icon('arrow', 'muted')}</button>`;
+}
+
+async function areaSheet() {
+  const sh = sheet(`<div class="step left town">
+    <h2>Where do you go to meetings?</h2>
+    <p class="muted">Pick a town. Meetings within 25 miles of it show on Today. Only the town is kept, never where your phone was.</p>
+    <input type="search" id="placeq" placeholder="Town or city" autocomplete="off" aria-label="Town">
+    <ul class="pick places" id="places"><li class="muted small">Loading</li></ul>
+    <button class="btn secondary block" data-locate type="button">${icon('pin')} Use my location once</button>
+    ${S.me.area ? '<button class="btn block ghost" data-clear type="button">Stop showing nearby meetings</button>' : ''}
+  </div>`, { label: 'Your town' });
+  const body = sh.body;
+  let places = S.places;
+  try { places = S.places = S.places || await api('/api/directory/places'); }
+  catch (e) { body.querySelector('#places').innerHTML = `<li class="muted small">${esc(e.message)}</li>`; return; }
+  const draw = () => {
+    const q = body.querySelector('#placeq').value.trim().toLowerCase();
+    const hits = places.filter(p => !q || p.city.toLowerCase().includes(q)).slice(0, 10);
+    body.querySelector('#places').innerHTML = hits.length ? hits.map(p => `<li><button class="pick-row ${S.me.area?.label === p.label ? 'on' : ''}"
+        data-place="${esc(p.label)}" data-lat="${p.lat}" data-lng="${p.lng}" type="button"><b>${esc(p.label)}</b>
+        <span class="muted small">${plural(p.meetings, 'meeting')} a week</span></button></li>`).join('')
+      : '<li class="muted small">No town by that name in the directory yet.</li>';
+  };
+  draw();
+  body.querySelector('#placeq').oninput = draw;
+  body.querySelector('#placeq').focus();
+  const choose = async payload => {
+    try {
+      S.me.area = await api('/api/my/area', { method: 'POST', body: JSON.stringify(payload) });
+      S.expanded.clear();
+      sh.close();
+      toast(`Showing meetings near ${S.me.area.label}.`);
+      refresh();
+    } catch (e) { toast(e.message); }
+  };
+  body.querySelector('#places').onclick = e => {
+    const b = e.target.closest('[data-place]');
+    if (b) choose({ label: b.dataset.place, lat: Number(b.dataset.lat), lng: Number(b.dataset.lng) });
+  };
+  body.querySelector('[data-locate]').onclick = async e => {
+    const b = e.currentTarget;
+    b.disabled = true; b.textContent = 'Finding your location';
+    try {
+      const pos = await bestPosition({ goodEnoughM: 500, settleMs: 3000, hardTimeoutMs: 15000 });
+      await choose({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    } catch {
+      b.disabled = false; b.innerHTML = `${icon('pin')} Use my location once`;
+      toast('Could not read your location. Pick a town instead.');
+    }
+  };
+  body.querySelector('[data-clear]')?.addEventListener('click', async () => {
+    try { await api('/api/my/area', { method: 'DELETE' }); S.me.area = null; sh.close(); refresh(); }
+    catch (e) { toast(e.message); }
+  });
 }
 
 /* An officer asked something. It goes above everything else, because the
@@ -382,7 +483,8 @@ function meetingCard(m) {
       <div class="m-time"><b>${time(m.starts_at)}</b><span class="muted">${duration(m.duration_min)}</span></div>
       <div class="m-main">
         <h4>${esc(m.name)}</h4>
-        <p class="muted small">${esc(CATEGORY[m.category] || m.category)}${m.counts ? '' : ' · <span class="tag">Only you</span>'}</p>
+        <p class="muted small">${esc(CATEGORY[m.category] || m.category)}${m.counts ? '' : ' · <span class="tag">Only you</span>'}${
+          m.miles != null ? ` · ${m.miles < 1 ? 'under a mile' : `${Math.round(m.miles)} mi`} away` : ''}</p>
         ${m.address ? `<a class="addr small" href="${mapsUrl(m)}" target="_blank" rel="noopener">${icon('directions')} ${esc(m.address)}</a>` : ''}
       </div>
     </div>
@@ -1209,6 +1311,8 @@ app.addEventListener('click', e => {
     detail: () => detail(id),
     personal: personalMeeting,
     ask: () => { document.querySelector('dialog[open]')?.close(); askSheet(id); },
+    area: areaSheet,
+    more: () => { S.expanded.add(t.dataset.key); renderTab(); },
     addperson: addPersonSheet,
     removeperson: () => removePerson(id),
     export: exportRecord,
@@ -1218,6 +1322,16 @@ app.addEventListener('click', e => {
     retry: () => { S.loadError = null; renderTab(); refresh(); },
     reload: () => location.reload(),
   })[t.dataset.act]?.();
+});
+
+/* The search box on Today. Re-drawing the lists must not lose the caret. */
+document.addEventListener('input', e => {
+  if (e.target.id !== 'mfilter') return;
+  S.filter = e.target.value;
+  S.expanded.clear();
+  renderTab();
+  const f = $('#mfilter');
+  if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
 });
 
 function watchConnection() {

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import directory
 from ..auth import audit, current_user, require, scope_to_county
 from ..db import get_db
 from ..models import CheckIn, Meeting, MeetingSource, Role, User
@@ -37,18 +38,24 @@ def with_window(m: Meeting, now: datetime | None = None) -> dict:
         "opens_at": opens.isoformat(), "closes_at": closes.isoformat(),
         "ends_at": m.ends_at.isoformat(), "window_state": state,
         "counts": m.counts_toward_requirement, "county_id": m.county_id,
+        "series_id": m.series_id,
     }
 
 
 @router.get("")
 def list_meetings(since: datetime | None = None, until: datetime | None = None,
+                  lat: float | None = None, lng: float | None = None,
+                  within_mi: float = directory.DEFAULT_WITHIN_MI,
                   db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
-    Meetings in the caller's county. `since` and `until` bound the start time,
-    which the phone uses to ask for "today and the next week" instead of
-    every meeting the county has ever held.
+    Meetings in the caller's county, and for a participant the directory
+    meetings near the town they chose (or near `lat`,`lng` if given), in the
+    window `since` to `until`. The phone asks for "today and the next week"
+    instead of every meeting the county has ever held. Directory meetings
+    within that window are created as rows here, so each one has an id a
+    check-in can point at.
     """
-    q = scope_to_county(select(Meeting), Meeting, user).order_by(Meeting.starts_at.desc())
+    q = scope_to_county(select(Meeting), Meeting, user)
     if since is not None:
         q = q.where(Meeting.starts_at >= _aware(since))
     if until is not None:
@@ -60,7 +67,17 @@ def list_meetings(since: datetime | None = None, until: datetime | None = None,
         q = q.where((Meeting.source != MeetingSource.personal) | (Meeting.created_by_id == user.id))
     else:
         q = q.where(Meeting.source != MeetingSource.personal)
-    return [with_window(m) for m in db.scalars(q).all()]
+    rows = list(db.scalars(q).all())
+
+    if user.role == Role.participant:
+        centre = (lat, lng) if lat is not None and lng is not None else (
+            (user.area_lat, user.area_lng) if user.area_lat is not None else None)
+        if centre and since is not None and until is not None:
+            near = [s for s, _ in directory.nearby(db, centre[0], centre[1], within_mi,
+                                                   county_id=user.county_id)]
+            rows += directory.occurrences(db, near, _aware(since), _aware(until))
+    rows.sort(key=lambda m: m.starts_at, reverse=True)
+    return [with_window(m) for m in rows]
 
 
 def _aware(dt: datetime) -> datetime:

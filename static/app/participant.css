@@ -189,3 +189,17 @@ b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nu
 .people-list li:first-child { border-top: 0; }
 .people-list .who { flex: 1; display: flex; flex-direction: column; }
 .people-list + .btn { margin-top: 10px; }
+
+/* ---------- the town, and long lists ---------- */
+.area { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 4px; font-size: 15px; color: var(--ink-2); }
+.area > span { display: inline-flex; align-items: center; gap: 7px; }
+.area .ic { width: 18px; height: 18px; color: var(--brand); }
+.findbox input { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-height: 48px; }
+.day .muted { font-weight: 500; }
+.btn.more { margin: 4px 0 10px; }
+.town input[type="search"] { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; min-height: 48px; }
+.places { max-height: 46vh; overflow: auto; }
+.places .pick-row b { display: block; }
+.places .pick-row .small { display: block; margin-top: 2px; font-weight: 500; }

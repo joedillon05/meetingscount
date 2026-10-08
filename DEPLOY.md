@@ -62,6 +62,21 @@ number you hold, then look at the `sms_log` table or the audit log.
 Expect about a cent per message segment and a few dollars a month for the
 number, at Twilio's current prices. A confirmation ask is two segments.
 
+## The meeting directory
+
+`fly.toml` names `MC_DIRECTORY_FILE`, and the container imports that list
+into the directory the first time it boots with an empty one. To load a new
+or updated list later, copy it up and run the importer on the machine:
+
+```bash
+fly ssh sftp shell                      # put "another area.xlsx" /data/
+fly ssh console -C "python tools/import_meetings.py /data/another\ area.xlsx --prune"
+```
+
+`--prune` retires meetings from that source that the new file no longer
+lists. Each list is its own source, named after the site it came from, so
+one area's file never touches another's.
+
 ## Why a preview still cannot hold real people
 
 `MC_DEMO=1` lists the demo staff accounts and their shared password on the

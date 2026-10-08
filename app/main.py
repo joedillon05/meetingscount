@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import create_all
 from .routers import (
-    admin, auth, caseload, checkins, confirmations, me, meetings, reports, reviews,
+    admin, auth, caseload, checkins, confirmations, directory, me, meetings, reports, reviews,
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -81,7 +81,8 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
-          reviews.router, reports.router, admin.router, confirmations.router):
+          reviews.router, reports.router, admin.router, confirmations.router,
+          directory.router):
     app.include_router(r)
 
 

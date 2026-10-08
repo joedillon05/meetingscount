@@ -156,6 +156,12 @@ class User(Base):
     consented_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     consent_version: Mapped[str | None] = mapped_column(String(16))
 
+    # Where to look for meetings: a town the participant picked, as the
+    # directory's centre for that town. Chosen once, not a location log.
+    area_label: Mapped[str | None] = mapped_column(String(80))
+    area_lat: Mapped[float | None] = mapped_column(Float)
+    area_lng: Mapped[float | None] = mapped_column(Float)
+
     # Sign-in. Staff use a password and, if they turn it on, an authenticator
     # app. Participants use their phone number and a one-time code, so there
     # is no password to lose. Hashes only; see app/security.py.
@@ -216,10 +222,54 @@ class Requirement(Base):
 # Meetings and check-ins
 # --------------------------------------------------------------------------- #
 
+class MeetingSeries(Base):
+    """
+    A meeting that happens every week: the directory. Imported from an area's
+    published list, one row per name, weekday and time. Each week's instance
+    becomes a Meeting row as it is needed, so a check-in always points at one
+    date and the compliance maths never has to know about recurrence.
+
+    county_id is null for the shared directory, which every county sees.
+    """
+    __tablename__ = "meeting_series"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[MeetingCategory] = mapped_column(Enum(MeetingCategory), default=MeetingCategory.public)
+    source_name: Mapped[str] = mapped_column(String(60), index=True)      # aa-semi.org
+    source_url: Mapped[str | None] = mapped_column(String(300))
+    external_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    weekday: Mapped[int] = mapped_column(Integer)                         # 0 = Monday
+    start_minute: Mapped[int] = mapped_column(Integer)                    # after local midnight
+    duration_min: Mapped[int] = mapped_column(Integer, default=60)
+    timezone: Mapped[str] = mapped_column(String(64), default="America/Detroit")
+    street: Mapped[str | None] = mapped_column(String(120))
+    city: Mapped[str | None] = mapped_column(String(80), index=True)
+    state: Mapped[str] = mapped_column(String(2), default="MI")
+    zip: Mapped[str | None] = mapped_column(String(10))
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    radius_ft: Mapped[float] = mapped_column(Float, default=500)
+    time_window_min: Mapped[int] = mapped_column(Integer, default=60)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    imported_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+
+    __table_args__ = (Index("ix_meeting_series_latlng", "lat", "lng"),)
+
+    @property
+    def address(self) -> str:
+        parts = [p for p in (self.street, self.city) if p]
+        tail = " ".join(p for p in (self.state, self.zip) if p)
+        return ", ".join(parts + ([tail] if tail else []))
+
+
 class Meeting(Base):
     __tablename__ = "meetings"
     id: Mapped[int] = mapped_column(primary_key=True)
     county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("meeting_series.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     category: Mapped[MeetingCategory] = mapped_column(Enum(MeetingCategory), default=MeetingCategory.public)
     source: Mapped[MeetingSource] = mapped_column(Enum(MeetingSource), default=MeetingSource.staff)
@@ -232,6 +282,9 @@ class Meeting(Base):
     time_window_min: Mapped[int] = mapped_column(Integer, default=60)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    # One row per series and date, however many phones ask for the same week.
+    __table_args__ = (Index("ux_meetings_series_start", "series_id", "starts_at", unique=True),)
 
     @property
     def counts_toward_requirement(self) -> bool:

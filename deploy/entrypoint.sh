@@ -15,5 +15,8 @@ exec setpriv --reuid=10001 --regid=10001 --init-groups sh -c '
   if [ "$MC_SEED_ON_BOOT" = "1" ]; then
     python -m app.seed --if-empty
   fi
+  if [ -n "$MC_DIRECTORY_FILE" ]; then
+    python tools/import_meetings.py "$MC_DIRECTORY_FILE" --if-empty
+  fi
   exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips="*"
 '

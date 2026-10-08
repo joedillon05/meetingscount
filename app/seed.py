@@ -24,8 +24,8 @@ from .geo import feet_to_meters
 from .confirming import expires as link_expires, new_token
 from .models import (
     AuditLog, Base, CheckIn, CheckInStatus, Confirmation, ConfirmationStatus, Confirmer, County,
-    Dispute, Meeting, MeetingCategory, MeetingSource, Participant, Program, Requirement,
-    RequirementPeriod, Review, ReviewDecision, Role, SmsLog, SmsOptOut, User,
+    Dispute, Meeting, MeetingCategory, MeetingSeries, MeetingSource, Participant, Program,
+    Requirement, RequirementPeriod, Review, ReviewDecision, Role, SmsLog, SmsOptOut, User,
 )
 from .routers.auth import DEMO_PASSWORD
 from .security import hash_password
@@ -66,16 +66,32 @@ PARTICIPANTS = [
 
 
 def _wipe(db) -> None:
+    """
+    Clear the demo data. The meeting directory is not demo data: it is
+    imported from an area's list and takes a while, so it stays.
+    """
     if settings.DATABASE_URL.startswith("sqlite"):
         # Local dev has no migrations, so rebuild the tables outright. That
         # also picks up any column added since the file was first created.
+        # The directory rows are carried across the rebuild.
+        kept = [{c.name: getattr(row, c.name) for c in MeetingSeries.__table__.columns}
+                for row in db.query(MeetingSeries)] if _has_table("meeting_series") else []
+        db.close()
         Base.metadata.drop_all(engine)
         Base.metadata.create_all(engine)
+        if kept:
+            db.execute(MeetingSeries.__table__.insert(), kept)
+            db.commit()
         return
     for model in (AuditLog, SmsLog, SmsOptOut, Confirmation, Confirmer, Review, Dispute,
                   CheckIn, Requirement, Meeting, Participant, User, Program, County):
         db.execute(delete(model))
     db.commit()
+
+
+def _has_table(name: str) -> bool:
+    from sqlalchemy import inspect
+    return name in inspect(engine).get_table_names()
 
 
 def _spec(m: Meeting) -> MeetingSpec:
@@ -176,7 +192,9 @@ def seed(reset: bool = True) -> dict:
             # Readable, stable numbers: a demo works better when the phone
             # number on screen is one someone can type without squinting.
             u = User(county_id=county.id, role=Role.participant, name=name,
-                     email=None, phone=f"+1734555{100 + idx:04d}")
+                     email=None, phone=f"+1734555{100 + idx:04d}",
+                     # Everyone starts out looking for meetings around Ann Arbor.
+                     area_label="Ann Arbor, MI", area_lat=42.2808, area_lng=-83.7430)
             if pattern != "first_day":
                 # Everyone with history has been through the consent screen.
                 u.consented_at = now - timedelta(days=60)

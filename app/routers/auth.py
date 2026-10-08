@@ -75,14 +75,18 @@ def _me(user: User, db: Session) -> dict:
 # --------------------------------------------------------------------------- #
 
 @router.get("/context")
-def context():
+def context(db: Session = Depends(get_db)):
     """
     Public. Says which ways in exist, and in demo mode hands over the demo
     accounts so a pitch does not start with someone mistyping a password.
     """
+    from sqlalchemy import func
+    from ..models import MeetingSeries
     out = {"demo": settings.DEMO, "dev_auth": settings.DEV_AUTH,
            "staff_password": True, "participant_code": True,
-           "texting": settings.sms_configured}
+           "texting": settings.sms_configured,
+           "directory": bool(db.scalar(select(func.count(MeetingSeries.id))
+                                       .where(MeetingSeries.active.is_(True))))}
     if settings.DEMO:
         out["demo_password"] = DEMO_PASSWORD
     return out

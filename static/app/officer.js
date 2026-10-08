@@ -576,8 +576,9 @@ async function viewMeetings() {
   v.innerHTML = `
     <div class="page-head"><div><h1>Meetings</h1><p class="muted">Meetings that count toward a requirement. Participants' personal meetings are private and not listed.</p></div></div>
     <div class="msplit">
+      <div class="mstack">
       <section class="card flush">
-        <div class="toolbar"><span class="muted small">${plural(meetings.length, 'meeting')}</span></div>
+        <div class="toolbar"><span class="muted small">${plural(meetings.length, 'meeting')} on the county's own list</span></div>
         <div class="table-wrap tall"><table class="grid">
           <thead><tr><th>Name</th><th>Type</th><th>Starts</th><th>Check-in</th><th>Radius</th><th></th></tr></thead>
           <tbody>${meetings.map(m => `<tr>
@@ -589,6 +590,19 @@ async function viewMeetings() {
             <td><button class="btn ghost sm-btn" data-del="${m.id}" data-name="${esc(m.name)}" type="button" aria-label="Delete ${esc(m.name)}">${icon('trash')}</button></td>
           </tr>`).join('')}</tbody></table></div>
       </section>
+      <section class="card flush dir" aria-labelledby="h-dir">
+        <div class="toolbar">
+          <b id="h-dir">Directory</b><span class="muted small" id="dirStats">Loading</span>
+          <span class="spacer"></span>
+          <select id="dirDay" aria-label="Weekday"><option value="">Any day</option>${WEEKDAYS.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select>
+          <input type="search" id="dirQ" placeholder="Search by name, town or zip" aria-label="Search the directory">
+        </div>
+        <div class="table-wrap"><table class="grid">
+          <thead><tr><th>Name</th><th>When</th><th>Where</th><th>Source</th></tr></thead>
+          <tbody id="dirRows"><tr><td colspan="4" class="muted">Weekly meetings imported from an area's published list. Participants see the ones near the town they chose, and a check-in at any of them counts. Search to look one up.</td></tr></tbody>
+        </table></div>
+      </section>
+      </div>
       <div class="mside">
         <section class="card">
           <h2 class="h2">Add a meeting</h2>
@@ -612,11 +626,43 @@ async function viewMeetings() {
       </div>
     </div>`;
   drawMeetingsMap(meetings);
+  wireDirectory(v);
   v.querySelector('#newMeeting').onsubmit = createMeeting;
   v.querySelector('tbody').onclick = e => {
     const b = e.target.closest('[data-del]');
     if (b) deleteMeeting(Number(b.dataset.del), b.dataset.name);
   };
+}
+
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const clockFromMinutes = m => `${((m / 60 | 0) % 12) || 12}:${String(m % 60).padStart(2, '0')} ${m < 720 ? 'AM' : 'PM'}`;
+
+/* The imported directory: a count of what is in it, and a search. */
+function wireDirectory(v) {
+  const stats = v.querySelector('#dirStats'), rows = v.querySelector('#dirRows');
+  const q = v.querySelector('#dirQ'), dayPick = v.querySelector('#dirDay');
+  api('/api/directory/stats').then(st => {
+    stats.textContent = st.meetings
+      ? `${st.meetings.toLocaleString()} weekly meetings from ${st.sources.map(x => `${x.name}${x.last_import ? `, imported ${monthDay(x.last_import)}` : ''}`).join(' and ')}`
+      : 'Nothing imported yet. See tools/import_meetings.py.';
+  }).catch(() => { stats.textContent = ''; });
+  let timer;
+  const search = async () => {
+    const term = q.value.trim(), d = dayPick.value;
+    if (!term && d === '') return;
+    let hits;
+    try { hits = await api(`/api/directory?q=${encodeURIComponent(term)}${d === '' ? '' : `&day=${d}`}&limit=80`); }
+    catch (e) { rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; return; }
+    rows.innerHTML = hits.length ? hits.map(h => `<tr>
+        <td><b>${esc(h.name)}</b></td>
+        <td class="nowrap">${WEEKDAYS[h.weekday]}s, ${clockFromMinutes(h.start_minute)}<div class="muted small">${h.duration_min} min</div></td>
+        <td>${esc(h.address)}</td>
+        <td class="muted small">${h.url ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.source)}</a>` : esc(h.source)}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="4" class="muted">Nothing in the directory matches that.</td></tr>';
+  };
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(search, 250); };
+  dayPick.onchange = search;
 }
 
 function drawMeetingsMap(meetings) {

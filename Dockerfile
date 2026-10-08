@@ -14,6 +14,8 @@ COPY app ./app
 COPY static ./static
 COPY alembic ./alembic
 COPY alembic.ini .
+COPY tools ./tools
+COPY data ./data
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Never run as root in a container a county's security review will look at.

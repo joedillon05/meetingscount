@@ -19,6 +19,7 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
   MC_DEMO = "1"
   MC_DEV_AUTH = "0"                # no header shortcut: sign-in is real
   MC_SEED_ON_BOOT = "1"
+  MC_DIRECTORY_FILE = "data/semi-aa-meetings-2026-01-28.csv"   # the meeting directory, first boot only
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"
   MC_PUBLIC_URL = "https://meetingscount-preview.fly.dev"   # links in texts, webhook checks

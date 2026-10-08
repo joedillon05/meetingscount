@@ -36,6 +36,7 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 | Control | How | Where |
 |---|---|---|
 | Collected once | Location is read at the tap, in the foreground, for check-in and check-out. No background tracking exists in the code | `static/app/participant.js` |
+| Nearby means a town | To show meetings nearby, the participant picks a town from the directory, or reads their location once and the nearest town is what gets kept. The app never stores where the phone was for this | `app/routers/directory.py` |
 | Told plainly | A consent screen before the first check-in, recorded with a version. Check-in is refused without it | `app/routers/me.py`, `app/routers/checkins.require_consent` |
 | Outcomes, not maps | The caseload, the participant record and the review list carry no coordinates. One check-in's coordinates appear only in its review view, and that view writes an audit row | `app/schemas.checkin_out`, `app/routers/reviews.py` |
 | Bulk location | One endpoint, admin only, county scoped, audited every time | `app/routers/admin.ops_checkins` |

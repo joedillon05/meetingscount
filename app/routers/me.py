@@ -53,6 +53,8 @@ def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
         "program": program.name if program else None,
         "officer": p.officer.name if p and p.officer else None,
         "case_number": p.case_number if p else None,
+        "area": ({"label": user.area_label, "lat": user.area_lat, "lng": user.area_lng}
+                 if user.area_lat is not None else None),
         "consent": {
             "version": settings.CONSENT_VERSION,
             "accepted_at": user.consented_at.isoformat() if user.consented_at else None,

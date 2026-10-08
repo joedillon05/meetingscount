@@ -78,6 +78,13 @@ class AskIn(BaseModel):
     save: bool = True
 
 
+class AreaIn(BaseModel):
+    """A town from the directory, or a point to find the nearest town to."""
+    label: Optional[str] = Field(default=None, max_length=80)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
 class AnswerIn(BaseModel):
     answer: str = Field(pattern="^(yes|no)$")
     note: Optional[str] = Field(default=None, max_length=400)
