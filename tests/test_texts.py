@@ -423,3 +423,35 @@ def test_the_consent_screen_promises_texts_and_the_first_text_says_how_to_stop(c
     # Accepting again does not text again.
     client.post("/api/my/consent", json={"version": me["consent"]["version"]}, headers=as_(riley))
     assert len(phones.to(number)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# The admin's Texts page
+# --------------------------------------------------------------------------- #
+
+def test_admin_sees_the_setup_sends_a_test_and_reads_the_log(client, ids, phones):
+    assert client.get("/api/sms/setup", headers=as_(ids["officer"])).status_code == 403
+    setup = client.get("/api/sms/setup", headers=as_(ids["admin"])).json()
+    assert setup["configured"] is True
+    assert setup["inbound_url"] == "https://app.example/api/sms/inbound"
+    assert setup["status_url"] == "https://app.example/api/sms/status"
+    assert setup["sender"] == "(734) 555 ... 0000"
+
+    r = client.post("/api/sms/test", json={"to": "734-555-0170"}, headers=as_(ids["admin"]))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "sent" and r.json()["to"] == "(734) 555 ... 0170"
+    body = phones.to("+17345550170")[0]
+    assert body.startswith("MeetingsCount:") and "test" in body.lower() and "STOP" in body
+
+    log = client.get("/api/sms/log", headers=as_(ids["admin"])).json()
+    assert log[0]["purpose"] == "test" and log[0]["to"] == "(734) 555 ... 0170"
+    assert log[0]["who"] and log[0]["status"] == "sent"
+    assert client.get("/api/sms/log", headers=as_(ids["officer"])).status_code == 403
+    assert client.post("/api/sms/test", json={"to": "12"}, headers=as_(ids["admin"])).status_code == 422
+
+
+def test_a_test_text_is_refused_while_texting_is_off(client, ids, no_phones):
+    setup = client.get("/api/sms/setup", headers=as_(ids["admin"])).json()
+    assert setup["configured"] is False
+    r = client.post("/api/sms/test", json={"to": "734-555-0170"}, headers=as_(ids["admin"]))
+    assert r.status_code == 503 and no_phones.sent == []

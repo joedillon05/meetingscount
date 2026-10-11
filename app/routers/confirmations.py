@@ -20,15 +20,17 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import confirming, sms
-from ..auth import audit, client_ip, current_user
+from ..auth import audit, client_ip, current_user, require, scope_to_county
 from ..config import settings
 from ..db import SessionLocal, get_db
-from ..models import CheckIn, Confirmation, Confirmer, County, Meeting, MeetingSource, User
-from ..schemas import AnswerIn, AskIn, ConfirmerIn
+from ..models import (
+    CheckIn, Confirmation, Confirmer, County, Meeting, MeetingSource, Role, SmsLog, SmsOptOut, User,
+)
+from ..schemas import AnswerIn, AskIn, ConfirmerIn, TestTextIn
 from ..security import normalize_phone, too_many
 
 router = APIRouter(prefix="/api", tags=["confirmations"])
@@ -342,3 +344,58 @@ async def delivery_status(request: Request, db: Session = Depends(get_db)):
     if sid and status:
         sms.record_status(db, sid, status, params.get("ErrorCode"))
     return _twiml()
+
+
+# --------------------------------------------------------------------------- #
+# The admin's view of texting: what to paste into Twilio, a test, the log
+# --------------------------------------------------------------------------- #
+
+def _log_out(row: SmsLog, who: str | None) -> dict:
+    return {"id": row.id, "at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
+            "to": sms.mask(row.to_phone), "who": who, "purpose": row.purpose,
+            "status": row.status, "error": row.error, "body": row.body}
+
+
+@router.get("/sms/setup")
+def sms_setup(db: Session = Depends(get_db), user: User = Depends(require(Role.admin))):
+    base, sender = settings.PUBLIC_URL, settings.TWILIO_FROM
+    return {
+        "configured": settings.sms_configured,
+        "sender": (("a messaging service" if sender.startswith("MG") else sms.mask(sender))
+                   if sender else None),
+        "public_url": base or None,
+        "inbound_url": f"{base}/api/sms/inbound" if base else None,
+        "status_url": f"{base}/api/sms/status" if base else None,
+        "opt_outs": db.scalar(select(func.count(SmsOptOut.id))) or 0,
+        "demo": settings.DEMO,
+    }
+
+
+@router.get("/sms/log")
+def sms_log(limit: int = 200, db: Session = Depends(get_db),
+            user: User = Depends(require(Role.admin))):
+    """Every text this county tried to send, newest first, numbers masked."""
+    q = scope_to_county(select(SmsLog, User).outerjoin(User, User.id == SmsLog.user_id), SmsLog, user)
+    q = q.order_by(SmsLog.created_at.desc()).limit(max(1, min(limit, 500)))
+    return [_log_out(row, who.name if who else None) for row, who in db.execute(q)]
+
+
+@router.post("/sms/test")
+def sms_test(body: TestTextIn, request: Request, db: Session = Depends(get_db),
+             user: User = Depends(require(Role.admin))):
+    """One line to a number the admin holds, to see the whole path work."""
+    if not settings.sms_configured:
+        raise HTTPException(503, "Texting is not set up. Set MC_TWILIO_ACCOUNT_SID, "
+                                 "MC_TWILIO_AUTH_TOKEN and MC_TWILIO_FROM first.")
+    phone = normalize_phone(body.to)
+    if not phone or len(phone) < 11:
+        raise HTTPException(422, "Enter a mobile number with the area code.")
+    if too_many(f"sms-test:{user.id}", 5, 900):
+        raise HTTPException(429, "Five test texts every fifteen minutes is plenty.")
+    county = db.get(County, user.county_id) if user.county_id else None
+    row = sms.send(db, phone, f"MeetingsCount: a test text from {county.name if county else 'the dashboard'}. "
+                              "Nothing to do. Reply STOP to opt out.",
+                   purpose="test", user_id=user.id, county_id=user.county_id)
+    audit(db, user, "send_test_text", detail=f"{sms.mask(phone)}: {row.status}"
+          + (f" ({row.error})" if row.error else ""), request=request)
+    return _log_out(row, user.name)

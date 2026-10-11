@@ -56,8 +56,12 @@ Then, in the Twilio console:
    that number again, whichever side hears it first.
 
 Both webhooks check Twilio's signature against the auth token and refuse
-anything else. To try it, ask for a sign-in code from the phone app with a
-number you hold, then look at the `sms_log` table or the audit log.
+anything else.
+
+The dashboard's **Texts** page (county admins) shows the two webhook
+addresses to paste, sends a test text to a number you hold, and lists every
+text with what Twilio said about it. That is the first place to look when
+someone says a text never came.
 
 Expect about a cent per message segment and a few dollars a month for the
 number, at Twilio's current prices. A confirmation ask is two segments.

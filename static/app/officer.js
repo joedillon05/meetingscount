@@ -76,7 +76,8 @@ function renderShell() {
         <a data-nav="queue" href="#queue">${icon('inbox')}<span>Review queue</span><span class="count" id="qcount" hidden></span></a>
         <a data-nav="meetings" href="#meetings">${icon('calendar')}<span>Meetings</span></a>
         ${admin ? `<a data-nav="staff" href="#staff">${icon('users')}<span>Staff</span></a>
-        <a data-nav="audit" href="#audit">${icon('scroll')}<span>Audit log</span></a>` : ''}
+        <a data-nav="audit" href="#audit">${icon('scroll')}<span>Audit log</span></a>
+        <a data-nav="texts" href="#texts">${icon('note')}<span>Texts</span></a>` : ''}
       </nav>
       <span class="spacer"></span>
       ${S.staff ? `<a class="navlink" href="/ops">Ops</a><a class="navlink" href="/">Phone app</a>
@@ -108,6 +109,7 @@ function route() {
   if (view === 'meetings') return viewMeetings();
   if (view === 'staff') return viewStaff();
   if (view === 'audit') return viewAudit();
+  if (view === 'texts') return viewTexts();
   return viewCaseload();
 }
 
@@ -854,6 +856,88 @@ function manageStaffSheet(u) {
   };
 }
 
+/* ---------- texts ---------- */
+
+const TEXT_STATUS = {
+  delivered: ['Delivered', 'ok'], sent: ['Sent', 'ok'], queued: ['Queued', 'neutral'],
+  skipped: ['Not sent', 'warn'], failed: ['Failed', 'bad'], undelivered: ['Not delivered', 'bad'],
+};
+const TEXT_PURPOSE = {
+  login_code: 'Sign-in code', ask: 'Ask to confirm', receipt: 'Check-out receipt',
+  answer: 'Answer to the participant', welcome: 'Opt-in notice', test: 'Test',
+};
+
+async function viewTexts() {
+  const v = $('#view');
+  if (!['admin', 'superuser'].includes(S.me.role)) { location.hash = 'caseload'; return; }
+  loading(v);
+  let setup, rows;
+  try { [setup, rows] = await Promise.all([api('/api/sms/setup'), api('/api/sms/log?limit=300')]); }
+  catch (e) { return failed(v, e); }
+  const on = setup.configured;
+  v.innerHTML = `
+    <div class="page-head"><div><h1>Texts</h1>
+      <p class="muted">Every text the system tried to send, and what the phone company said about it. Links in texts are blanked out here.</p></div></div>
+    <div class="msplit">
+      <section class="card flush">
+        <div class="toolbar"><select id="tstat" aria-label="Filter by status"><option value="">All statuses</option>
+            ${Object.entries(TEXT_STATUS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select>
+          <input type="search" id="twho" placeholder="Search person or number" aria-label="Search person or number">
+          <span class="spacer"></span><span class="muted small" id="tcount"></span></div>
+        <div class="table-wrap tall"><table class="grid">
+          <thead><tr><th>When</th><th>To</th><th>What</th><th>Status</th><th>Detail</th></tr></thead>
+          <tbody id="trows"></tbody></table></div>
+      </section>
+      <div class="mside">
+        <section class="card">
+          <h2 class="h2">Setup</h2>
+          ${on ? `<p class="small"><span class="badge tone-ok sm">${icon('check')} Texting is on</span> from ${esc(setup.sender)}.</p>`
+            : `<p class="small"><span class="badge tone-warn sm">${icon('alert')} Texting is off</span> Nothing is sent until the Twilio settings are set on the server.${setup.demo ? ' In demo mode a confirmation link shows on the participant\'s screen instead.' : ''}</p>`}
+          <dl class="kv small setup">
+            <dt>Replies go to</dt><dd class="mono">${esc(setup.inbound_url || 'set MC_PUBLIC_URL first')}</dd>
+            <dt>Delivery reports</dt><dd class="mono">${esc(setup.status_url || 'set MC_PUBLIC_URL first')}</dd>
+            <dt>Opted out</dt><dd>${plural(setup.opt_outs, 'number')}</dd>
+          </dl>
+          <p class="fine">In the Twilio console, paste the first address into the number's "A message comes in" webhook. Delivery reports are asked for on every message, nothing to set.</p>
+        </section>
+        <section class="card">
+          <h2 class="h2">Send a test text</h2>
+          <form id="testText" class="form">
+            <label>Mobile number<input name="to" type="tel" required placeholder="(734) 555-0101" autocomplete="off" ${on ? '' : 'disabled'}></label>
+            <button class="btn block" type="submit" ${on ? '' : 'disabled'}>Send</button>
+          </form>
+          <p class="fine">One line that says it is a test, logged like any other text. Five every fifteen minutes at most.</p>
+        </section>
+      </div>
+    </div>`;
+  const draw = () => {
+    const st = $('#tstat').value, q = $('#twho').value.trim().toLowerCase();
+    const shown = rows.filter(r => (!st || r.status === st) && (!q || `${r.who || ''} ${r.to}`.toLowerCase().includes(q)));
+    $('#tcount').textContent = `${shown.length} of ${rows.length}`;
+    $('#trows').innerHTML = shown.map(r => {
+      const [label, tone] = TEXT_STATUS[r.status] || [r.status, 'neutral'];
+      return `<tr>
+        <td class="nowrap">${esc(dateTime(r.at))}</td>
+        <td>${r.who ? `<b>${esc(r.who)}</b><div class="muted small">${esc(r.to)}</div>` : esc(r.to)}</td>
+        <td>${esc(TEXT_PURPOSE[r.purpose] || r.purpose)}</td>
+        <td><span class="badge tone-${tone} sm">${label}</span></td>
+        <td class="small">${esc(r.error || '')}<div class="muted small">${esc(r.body)}</div></td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty-row">No texts yet.</td></tr>';
+  };
+  draw();
+  $('#tstat').onchange = draw; $('#twho').oninput = draw;
+  v.querySelector('#testText').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, b = f.querySelector('button');
+    b.disabled = true;
+    try {
+      const r = await api('/api/sms/test', { method: 'POST', body: JSON.stringify({ to: f.to.value }) });
+      toast(r.status === 'sent' ? `Sent to ${r.to}.` : `${TEXT_STATUS[r.status]?.[0] || r.status}: ${r.error || ''}`);
+      viewTexts();
+    } catch (err) { b.disabled = false; toast(err.message); }
+  };
+}
+
 /* ---------- audit ---------- */
 
 const ACTIONS = {
@@ -864,6 +948,7 @@ const ACTIONS = {
   create_meeting: 'Created a meeting', delete_meeting: 'Deleted a meeting', dispute: 'Participant added a note',
   accept_consent: 'Participant accepted consent', export_own_record: 'Participant downloaded their record',
   confirmation_asked: 'Participant asked someone to confirm a check-in', confirmation_answered: 'Someone answered a confirmation text',
+  send_test_text: 'Sent a test text', set_area: 'Participant chose their town',
   sms_opt_out: 'A number opted out of texts', login_code_requested: 'Participant asked for a sign-in code',
   issue_access_code: 'Issued a sign-in code', sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
   create_staff: 'Added a staff member', reset_staff_password: 'Reset a staff password', update_staff: 'Changed a staff account',

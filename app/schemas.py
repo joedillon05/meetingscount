@@ -85,6 +85,10 @@ class AreaIn(BaseModel):
     lng: float = Field(ge=-180, le=180)
 
 
+class TestTextIn(BaseModel):
+    to: str = Field(max_length=32)
+
+
 class AnswerIn(BaseModel):
     answer: str = Field(pattern="^(yes|no)$")
     note: Optional[str] = Field(default=None, max_length=400)

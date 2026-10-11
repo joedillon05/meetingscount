@@ -127,7 +127,8 @@ With those set, sign-in codes go by text as well. Without them nothing is
 sent: codes are read out by an officer, and in demo mode the confirmation
 link shows on the participant's screen so the whole loop can be walked
 through on one laptop. Every text is logged in `sms_log` with the link token
-blanked out. The Twilio side is in `DEPLOY.md`.
+blanked out, and a county admin reads that log, and sends a test text, from
+the dashboard's **Texts** page. The Twilio side is in `DEPLOY.md`.
 
 ## The meeting directory
 
