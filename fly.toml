@@ -22,7 +22,7 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
   MC_DIRECTORY_FILE = "data/semi-aa-meetings-2026-01-28.csv"   # the meeting directory, first boot only
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"
-  MC_PUBLIC_URL = "https://meetingscount-preview.fly.dev"   # links in texts, webhook checks
+  MC_PUBLIC_URL = "https://actionscountplus.com"   # links in texts, webhook checks, www redirect
 
 [http_service]
   internal_port = 8000

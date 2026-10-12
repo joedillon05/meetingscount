@@ -138,3 +138,12 @@ def test_retention_job_drops_old_pins_but_keeps_the_verdict(client, ids):
     for c in purged:
         assert c["lat"] is None
         assert c["distance_ft"] is not None and c["reasons"], "verdict must survive"
+
+
+def test_www_goes_to_the_one_public_address(client, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "PUBLIC_URL", "https://app.example")
+    r = client.get("/officer?x=1", headers={"host": "www.app.example"}, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "https://app.example/officer?x=1"
+    assert client.get("/healthz", headers={"host": "app.example"}).status_code == 200
+    assert client.get("/healthz", headers={"host": "meetingscount-preview.fly.dev"}).status_code == 200

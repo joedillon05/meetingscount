@@ -287,10 +287,12 @@ async def _twilio_form(request: Request) -> dict:
     """
     raw = (await request.body()).decode("utf-8", "replace")
     params = dict(parse_qsl(raw, keep_blank_values=True))
-    url = _base_url(request) + request.url.path
-    if request.url.query:
-        url += "?" + request.url.query
-    if not sms.signature_ok(url, params, request.headers.get("x-twilio-signature")):
+    tail = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    # Twilio signs the address it called. That is MC_PUBLIC_URL, or during a
+    # move to a new domain, the old address the console still points at.
+    signature = request.headers.get("x-twilio-signature")
+    bases = {_base_url(request), str(request.base_url).rstrip("/")}
+    if not any(sms.signature_ok(base + tail, params, signature) for base in bases):
         raise HTTPException(403, "bad signature")
     return params
 

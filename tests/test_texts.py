@@ -384,6 +384,19 @@ def test_webhooks_need_twilios_signature(client, phones):
     assert r.status_code == 403
 
 
+def test_a_webhook_still_pointed_at_the_old_address_keeps_working(client, phones):
+    # MC_PUBLIC_URL is app.example; the Twilio console still calls the server
+    # by the address it had before the move, which the test client calls testserver.
+    params = {"MessageSid": "SMnobody", "MessageStatus": "delivered"}
+    def post(url):
+        return client.post("/api/sms/status", data=params, headers={
+            "X-Twilio-Signature": sms.sign(url, params, TOKEN),
+            "Content-Type": "application/x-www-form-urlencoded"})
+    assert post("http://testserver/api/sms/status").status_code == 200
+    assert post("https://app.example/api/sms/status").status_code == 200
+    assert post("https://somewhere.else/api/sms/status").status_code == 403
+
+
 def test_delivery_report_updates_the_log(client, ids, phones):
     aisha = _named(client, "Aisha Bello")
     m = _meeting(client, ids["officer"], name="Delivery")

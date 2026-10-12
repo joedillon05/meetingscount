@@ -23,9 +23,10 @@ import os
 import secrets
 
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -149,6 +150,19 @@ async def cache_rules(request, call_next):
     else:
         response.headers.setdefault("Cache-Control", "no-cache")
     return response
+
+
+@app.middleware("http")
+async def one_address(request, call_next):
+    """
+    www.<domain> sends people on to <domain>, so a phone ends up with one
+    sign-in and one home-screen icon whichever way the address was typed.
+    """
+    host = urlsplit(settings.PUBLIC_URL).hostname if settings.PUBLIC_URL else None
+    if host and request.method in ("GET", "HEAD") and request.url.hostname == f"www.{host}":
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(settings.PUBLIC_URL + request.url.path + query, status_code=301)
+    return await call_next(request)
 
 
 @app.get("/", include_in_schema=False)

@@ -142,6 +142,24 @@ fly status                                  # machine, volume, health checks
 Roughly $3 to $6 a month for a shared-cpu-1x machine and the volume, less if
 it suspends most of the time.
 
+### The domain
+
+The preview answers at `https://actionscountplus.com`, registered at GoDaddy,
+which also runs its DNS. Two records on the bare domain point it at Fly, and
+`www` is a CNAME to the bare domain, so it follows:
+
+```
+A     @   66.241.125.2
+AAAA  @   2a09:8280:1::19f:b0da:0
+CNAME www @
+```
+
+Fly holds a certificate for both names (`fly certs list`) and renews it on
+its own. `MC_PUBLIC_URL` in `fly.toml` is the address texts link to, and the
+app sends `www` on to it. After changing it, point Twilio's "A message comes
+in" webhook at the new address too. Until then the old address keeps
+working: webhooks are checked against both.
+
 ### Testing it on a phone
 
 The demo meetings are at real addresses in Ann Arbor and Ypsilanti, so a
