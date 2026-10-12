@@ -41,8 +41,9 @@ class FakePhoneCompany:
 
 @pytest.fixture
 def phones(monkeypatch):
-    """Texting switched on, going to the fake."""
+    """A real deployment: demo off, texting switched on, going to the fake."""
     fake = FakePhoneCompany()
+    monkeypatch.setattr(settings, "DEMO", False)
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACtest")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", TOKEN)
     monkeypatch.setattr(settings, "TWILIO_FROM", "+17345550000")
@@ -50,6 +51,17 @@ def phones(monkeypatch):
     monkeypatch.setattr(sms, "transport", fake)
     yield fake
     monkeypatch.setattr(sms, "transport", None)
+
+
+ALLOWED = "+17345550170"
+
+
+@pytest.fixture
+def demo_phones(phones, monkeypatch):
+    """The preview: demo on, Twilio on, one number on the allow list."""
+    monkeypatch.setattr(settings, "DEMO", True)
+    monkeypatch.setattr(settings, "SMS_ALLOW", "(734) 555-0170")
+    yield phones
 
 
 @pytest.fixture
@@ -455,3 +467,65 @@ def test_a_test_text_is_refused_while_texting_is_off(client, ids, no_phones):
     assert setup["configured"] is False
     r = client.post("/api/sms/test", json={"to": "734-555-0170"}, headers=as_(ids["admin"]))
     assert r.status_code == 503 and no_phones.sent == []
+
+
+# --------------------------------------------------------------------------- #
+# The preview: demo on, Twilio on, an allow list
+# --------------------------------------------------------------------------- #
+
+def test_the_demo_only_texts_numbers_on_the_allow_list(client, ids, demo_phones):
+    dana = _named(client, "Dana Ruiz")
+    m = _meeting(client, ids["officer"], name="Allow list")
+    c = _checked_in(client, dana, m["id"])
+
+    # Anyone can sign in to a demo, so a stranger's number gets nothing. The
+    # link shows on screen, as it does with texting off.
+    r = _ask(client, dana, c["id"])
+    assert r.status_code == 201, r.text
+    assert r.json()["sent"] is False and "/confirm/" in r.json()["demo_link"]
+
+    # A number on the list gets the real text, and no link on screen.
+    r = _ask(client, dana, c["id"], name="Joe Tester", phone="734.555.0170")
+    assert r.status_code == 201, r.text
+    assert r.json()["sent"] is True and "demo_link" not in r.json()
+    assert len(demo_phones.to(ALLOWED)) == 1 and _link(demo_phones.to(ALLOWED)[0])
+    assert {to for to, _ in demo_phones.sent} == {ALLOWED}, "Dana's receipt is not on the list either"
+
+    log = client.get("/api/sms/log", headers=as_(ids["admin"])).json()
+    stranger = next(x for x in log if x["to"] == "(734) 555 ... 0199" and x["purpose"] == "ask")
+    assert stranger["status"] == "skipped" and "MC_SMS_ALLOW" in stranger["error"]
+
+
+def test_a_demo_sign_in_code_shows_on_screen_unless_the_number_is_listed(client, demo_phones, monkeypatch):
+    monkeypatch.setattr(settings, "DEV_AUTH", False)
+    r = client.post("/api/auth/code/request", json={"phone": "+17345550102"})
+    assert r.json()["delivered"] is False and "demo_code" in r.json()
+    assert demo_phones.sent == []
+    # A listed number that is nobody's gets the same answer as any real one.
+    r = client.post("/api/auth/code/request", json={"phone": ALLOWED})
+    assert r.json()["delivered"] is True and "demo_code" not in r.json()
+    assert demo_phones.sent == []
+
+
+def test_the_texts_page_names_the_allow_list(client, ids, demo_phones):
+    setup = client.get("/api/sms/setup", headers=as_(ids["admin"])).json()
+    assert setup["demo"] is True and setup["allow"] == ["(734) 555 ... 0170"]
+    r = client.post("/api/sms/test", json={"to": "734-555-0171"}, headers=as_(ids["admin"]))
+    assert r.json()["status"] == "skipped" and demo_phones.sent == []
+    r = client.post("/api/sms/test", json={"to": "734-555-0170"}, headers=as_(ids["admin"]))
+    assert r.json()["status"] == "sent" and len(demo_phones.to(ALLOWED)) == 1
+
+
+def test_the_allow_list_is_ignored_outside_demo_mode(client, ids, phones, monkeypatch):
+    monkeypatch.setattr(settings, "SMS_ALLOW", "(734) 555-0170")
+    assert client.get("/api/sms/setup", headers=as_(ids["admin"])).json()["allow"] is None
+    r = client.post("/api/sms/test", json={"to": "734-555-0171"}, headers=as_(ids["admin"]))
+    assert r.json()["status"] == "sent"
+
+
+def test_the_preview_password_does_not_stand_in_twilios_way(client, phones, monkeypatch):
+    monkeypatch.setattr(settings, "ACCESS_PASSWORD", "door")
+    assert client.get("/api/sms/setup").status_code == 401
+    params = {"MessageSid": "SMnobody", "MessageStatus": "delivered"}
+    assert _twilio_post(client, "/api/sms/status", params).status_code == 200
+    assert client.post("/api/sms/inbound", data={"From": "+17345550199", "Body": "YES"}).status_code == 403

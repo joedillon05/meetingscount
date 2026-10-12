@@ -7,7 +7,9 @@ number this" and reads what came back from the log.
 Nothing goes out unless MC_TWILIO_ACCOUNT_SID, MC_TWILIO_AUTH_TOKEN and
 MC_TWILIO_FROM are all set. Without them every message is written to the
 log as skipped, which is how development, the tests and the demo run: sign-in
-codes are read out by an officer and confirmation links show on screen.
+codes are read out by an officer and confirmation links show on screen. A
+demo with Twilio set up texts only the numbers in MC_SMS_ALLOW, because its
+sign-in screen hands out accounts to whoever opens it.
 
 Every attempt lands in sms_log with the status Twilio gave it, so a county
 can answer "did that text go out" without anyone's inbox. The body is kept
@@ -107,6 +109,21 @@ def get_transport() -> Transport:
                            settings.TWILIO_FROM, callback)
 
 
+def allow_list() -> set[str]:
+    """The numbers a demo deployment may text, from MC_SMS_ALLOW."""
+    return {p for p in (normalize_phone(x) for x in settings.SMS_ALLOW.split(",")) if p}
+
+
+def allowed(phone: str | None) -> bool:
+    """Outside demo mode any number may be texted. In demo mode, only the allow list."""
+    return not settings.DEMO or normalize_phone(phone) in allow_list()
+
+
+def can_text(phone: str | None) -> bool:
+    """Whether a text to this number would go out, opt-outs aside."""
+    return settings.sms_configured and allowed(phone)
+
+
 def redact(body: str) -> str:
     """The same text with any confirmation link token blanked out."""
     return re.sub(r"(/confirm/)[A-Za-z0-9_\-]+", r"\1...", body)
@@ -165,6 +182,8 @@ def send(db: Session, to: str | None, body: str, *, purpose: str, user_id: int |
         row.status, row.error = "failed", "no usable phone number"
     elif opted_out(db, phone):
         row.status, row.error = "skipped", "this number asked not to be texted"
+    elif settings.sms_configured and not allowed(phone):
+        row.status, row.error = "skipped", "demo mode only texts the numbers in MC_SMS_ALLOW"
     else:
         outcome = get_transport().send(phone, body)
         row.status, row.provider_sid, row.error = outcome.status, outcome.sid, outcome.error

@@ -175,8 +175,8 @@ def ask(checkin_id: int, body: AskIn, request: Request, background: BackgroundTa
     link = f"{_base_url(request)}/confirm/{token}"
     background.add_task(_send_ask, x.id, link)
     out = confirming.confirmation_out(x)
-    out["sent"] = settings.sms_configured
-    if settings.DEMO and not settings.sms_configured:
+    out["sent"] = sms.can_text(number)
+    if settings.DEMO and not out["sent"]:
         out["demo_link"] = link            # demo only: the text that would have gone out
     return out
 
@@ -368,6 +368,7 @@ def sms_setup(db: Session = Depends(get_db), user: User = Depends(require(Role.a
         "status_url": f"{base}/api/sms/status" if base else None,
         "opt_outs": db.scalar(select(func.count(SmsOptOut.id))) or 0,
         "demo": settings.DEMO,
+        "allow": sorted(sms.mask(p) for p in sms.allow_list()) if settings.DEMO else None,
     }
 
 

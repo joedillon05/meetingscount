@@ -82,6 +82,14 @@ class Settings:
     TWILIO_AUTH_TOKEN: str = os.environ.get("MC_TWILIO_AUTH_TOKEN", "")
     TWILIO_FROM: str = os.environ.get("MC_TWILIO_FROM", "")
 
+    # Demo mode lists its accounts on the sign-in screen, so anyone who opens
+    # it can sign in as a participant and type in a number to be texted. With
+    # Twilio set up in demo mode, texts go only to the numbers listed here,
+    # comma separated: yours, and whoever is in the room. Every other number
+    # gets the demo treatment, its code or link on screen. Ignored outside
+    # demo mode.
+    SMS_ALLOW: str = os.environ.get("MC_SMS_ALLOW", "")
+
     # Where links in texts point, with no trailing slash. A confirmation link
     # has to open on somebody else's phone, so it needs the public address.
     # Empty means links are built from the request that caused them, which

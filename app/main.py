@@ -117,7 +117,9 @@ async def preview_gate(request, call_next):
     MC_ACCESS_PASSWORD is set. For demo deployments only: see the note in
     config.Settings.ACCESS_PASSWORD.
     """
-    if not settings.ACCESS_PASSWORD or request.url.path == "/healthz":
+    # Twilio cannot type a password. Its two webhooks check its signature instead.
+    if not settings.ACCESS_PASSWORD or request.url.path in (
+            "/healthz", "/api/sms/inbound", "/api/sms/status"):
         return await call_next(request)
     given = ""
     header = request.headers.get("authorization", "")

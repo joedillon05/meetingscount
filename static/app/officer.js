@@ -874,7 +874,8 @@ async function viewTexts() {
   let setup, rows;
   try { [setup, rows] = await Promise.all([api('/api/sms/setup'), api('/api/sms/log?limit=300')]); }
   catch (e) { return failed(v, e); }
-  const on = setup.configured;
+  const on = setup.configured, allow = setup.allow || [];
+  const nobody = on && setup.demo && !allow.length;
   v.innerHTML = `
     <div class="page-head"><div><h1>Texts</h1>
       <p class="muted">Every text the system tried to send, and what the phone company said about it. Links in texts are blanked out here.</p></div></div>
@@ -891,7 +892,9 @@ async function viewTexts() {
       <div class="mside">
         <section class="card">
           <h2 class="h2">Setup</h2>
-          ${on ? `<p class="small"><span class="badge tone-ok sm">${icon('check')} Texting is on</span> from ${esc(setup.sender)}.</p>`
+          ${nobody ? `<p class="small"><span class="badge tone-warn sm">${icon('alert')} Texting is on, to nobody</span> Demo mode only texts the numbers in MC_SMS_ALLOW, and it is empty. Codes and links show on screen.</p>`
+            : on ? `<p class="small"><span class="badge tone-ok sm">${icon('check')} Texting is on</span> from ${esc(setup.sender)}.</p>
+              ${setup.demo ? `<p class="small">Demo mode: texts only go to ${allow.map(esc).join(', ')}. Any other number gets its code or link on screen.</p>` : ''}`
             : `<p class="small"><span class="badge tone-warn sm">${icon('alert')} Texting is off</span> Nothing is sent until the Twilio settings are set on the server.${setup.demo ? ' In demo mode a confirmation link shows on the participant\'s screen instead.' : ''}</p>`}
           <dl class="kv small setup">
             <dt>Replies go to</dt><dd class="mono">${esc(setup.inbound_url || 'set MC_PUBLIC_URL first')}</dd>

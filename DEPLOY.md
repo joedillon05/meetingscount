@@ -27,16 +27,33 @@ sign-in codes people are holding.
 
 Two things go by text: sign-in codes, and the ask to a sponsor or chair to
 confirm a check-in (plus a short text back to the participant with the
-answer). Nothing is sent until these are set:
+answer). Nothing is sent until these are set. `fly secrets import` reads
+them from the keyboard, so the auth token never lands in your shell history
+or a file. Type one per line, then Ctrl-D:
 
 ```bash
-fly secrets set MC_TWILIO_ACCOUNT_SID='AC...' MC_TWILIO_AUTH_TOKEN='...' MC_TWILIO_FROM='+1734...'
+fly secrets import
+```
+
+```
+MC_TWILIO_ACCOUNT_SID=AC...
+MC_TWILIO_AUTH_TOKEN=...
+MC_TWILIO_FROM=+1...
+MC_SMS_ALLOW=+1734...,+1313...
 ```
 
 `MC_TWILIO_FROM` is the number to send from, or a Messaging Service SID
 (`MG...`) if you set one up in Twilio. `MC_PUBLIC_URL` is already in
 `fly.toml`: links in texts are built from it, and so is the check on
 incoming webhooks, so it has to be the address people actually open.
+
+`MC_SMS_ALLOW` matters on the preview. Demo mode lists its accounts on the
+sign-in screen, so anyone who finds the URL can sign in as a participant
+and type in a number to be texted. In demo mode, texts go only to the
+numbers on this list: yours, and whoever is in the room. Every other number
+gets the old demo treatment, its code or link on screen, and the Texts page
+logs it as not sent. Empty means nobody. Outside demo mode it is ignored.
+To add someone before a demo, set it again with the whole list.
 
 Then, in the Twilio console:
 
@@ -56,7 +73,8 @@ Then, in the Twilio console:
    that number again, whichever side hears it first.
 
 Both webhooks check Twilio's signature against the auth token and refuse
-anything else.
+anything else. They are the only paths, besides the health check, that
+`MC_ACCESS_PASSWORD` lets through, because Twilio cannot type a password.
 
 The dashboard's **Texts** page (county admins) shows the two webhook
 addresses to paste, sends a test text to a number you hold, and lists every

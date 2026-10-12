@@ -194,7 +194,7 @@ def request_code(body: CodeRequestIn, request: Request, db: Session = Depends(ge
     if not phone or too_many(f"code:{ip}", 5, 900) or too_many(f"code:{phone}", 5, 3600):
         raise HTTPException(429, "Too many requests. Wait a few minutes, or ask your officer "
                                  "to read you a code.")
-    texting = settings.sms_configured
+    texting = sms.can_text(phone)
     out = ({"delivered": True, "ask_officer": False,
             "message": f"If that number is on file, a code is on its way to it. It works for "
                        f"{settings.LOGIN_CODE_MINUTES} minutes."}

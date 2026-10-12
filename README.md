@@ -126,7 +126,9 @@ Texts go through Twilio. Set `MC_TWILIO_ACCOUNT_SID`, `MC_TWILIO_AUTH_TOKEN`,
 With those set, sign-in codes go by text as well. Without them nothing is
 sent: codes are read out by an officer, and in demo mode the confirmation
 link shows on the participant's screen so the whole loop can be walked
-through on one laptop. Every text is logged in `sms_log` with the link token
+through on one laptop. A demo with Twilio set up texts only the numbers in
+`MC_SMS_ALLOW`, since anyone can sign in to a demo; every other number gets
+its code or link on screen. Every text is logged in `sms_log` with the link token
 blanked out, and a county admin reads that log, and sends a test text, from
 the dashboard's **Texts** page. The Twilio side is in `DEPLOY.md`.
 
