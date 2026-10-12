@@ -52,9 +52,10 @@ def upgrade() -> None:
     op.create_index("ix_meeting_series_city", "meeting_series", ["city"])
     op.create_index("ix_meeting_series_latlng", "meeting_series", ["lat", "lng"])
 
+    # Batch mode rebuilds the table on SQLite, and refuses a foreign key without a name.
     with op.batch_alter_table("meetings") as t:
-        t.add_column(sa.Column("series_id", sa.Integer(), sa.ForeignKey("meeting_series.id"),
-                               nullable=True))
+        t.add_column(sa.Column("series_id", sa.Integer(), nullable=True))
+        t.create_foreign_key("fk_meetings_series_id", "meeting_series", ["series_id"], ["id"])
     op.create_index("ix_meetings_series_id", "meetings", ["series_id"])
     op.create_index("ux_meetings_series_start", "meetings", ["series_id", "starts_at"], unique=True)
 

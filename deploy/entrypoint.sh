@@ -11,6 +11,7 @@ if [ -d /data ]; then
 fi
 
 exec setpriv --reuid=10001 --regid=10001 --init-groups sh -c '
+  set -e                     # a failed migration stops here, never serves a half-built database
   alembic upgrade head
   if [ "$MC_SEED_ON_BOOT" = "1" ]; then
     python -m app.seed --if-empty
