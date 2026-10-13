@@ -14,7 +14,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import compliance, confirming, sms
+from .. import billing, compliance, confirming, sms
 from ..auth import audit, current_user
 from ..config import settings
 from ..db import SessionLocal, get_db
@@ -48,13 +48,17 @@ def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
         "county_id": user.county_id, "participant_id": p.id if p else None,
         "must_change_password": user.must_change_password,
         "mfa": bool(user.totp_enabled_at),
-        "county": county.name if county else None,
+        # The self-pay county is plumbing, not something a person belongs to.
+        "county": county.name if county and not county.self_serve else None,
         "timezone": county.timezone if county else "America/Detroit",
         "program": program.name if program else None,
         "officer": p.officer.name if p and p.officer else None,
         "case_number": p.case_number if p else None,
         "area": ({"label": user.area_label, "lat": user.area_lat, "lng": user.area_lng}
                  if user.area_lat is not None else None),
+        # None for someone their county enrolled. A self-serve profile sees
+        # its subscription here and nowhere else.
+        "billing": billing.status_out(db, user),
         "consent": {
             "version": settings.CONSENT_VERSION,
             "accepted_at": user.consented_at.isoformat() if user.consented_at else None,

@@ -108,7 +108,12 @@ def code_hash(user_id: int, code: str) -> str:
     Keyed, so a stolen database alone does not let someone grind six digits
     offline. Ties the code to one account as well.
     """
-    return hmac.new(settings.secret_key_bytes, f"{user_id}:{code}".encode(),
+    return keyed_hash(str(user_id), code)
+
+
+def keyed_hash(scope: str, code: str) -> str:
+    """The same keyed hash for a code that belongs to something other than an account."""
+    return hmac.new(settings.secret_key_bytes, f"{scope}:{code}".encode(),
                     hashlib.sha256).hexdigest()
 
 

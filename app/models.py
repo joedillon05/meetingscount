@@ -114,6 +114,9 @@ class County(Base):
     default_radius_ft: Mapped[float] = mapped_column(Float, default=500)
     default_window_min: Mapped[int] = mapped_column(Integer, default=60)
     retention_days: Mapped[int] = mapped_column(Integer, default=1095)   # 3 years
+    # The one county that holds people who signed up on their own and pay
+    # for MeetingsCount themselves. It has no officers; see app/billing.py.
+    self_serve: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     programs: Mapped[list[Program]] = relationship(back_populates="county")
@@ -491,6 +494,64 @@ class LoginCode(Base):
     @property
     def live(self) -> bool:
         return self.used_at is None and self.attempts < 5 and self.expires_at > utcnow()
+
+
+class Signup(Base):
+    """
+    A profile somebody is in the middle of creating at /join. The details
+    wait here until the phone number is proven with a code, so nobody can
+    make an account on a number that is not theirs. Used once, then kept
+    for the record.
+    """
+    __tablename__ = "signups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str | None] = mapped_column(String(200))
+    per_week: Mapped[int] = mapped_column(Integer, default=3)
+    starts_on: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+
+    @property
+    def live(self) -> bool:
+        return self.used_at is None and self.attempts < 5 and self.expires_at > utcnow()
+
+
+class Subscription(Base):
+    """
+    One self-serve participant's standing with Stripe. Stripe is the source
+    of truth; this row is the copy the app reads on every request, kept
+    current by Stripe's webhooks and by a sync when the person comes back
+    from checkout. Nothing here can charge a card: only ids and a status.
+    """
+    __tablename__ = "subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    price_id: Mapped[str | None] = mapped_column(String(64))
+    # Stripe's own words: trialing, active, past_due, canceled, unpaid,
+    # incomplete, incomplete_expired, paused. Plus two of ours: "unpaid_yet"
+    # before checkout has happened, and "demo" when there is no Stripe.
+    status: Mapped[str] = mapped_column(String(24), default="unpaid_yet")
+    current_period_end: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_event_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    @property
+    def active(self) -> bool:
+        """Whether the person may use the app today. Past due keeps working
+        while Stripe retries the card; canceled and unpaid do not."""
+        return self.status in ("active", "trialing", "past_due", "demo")
 
 
 class AuditLog(Base):

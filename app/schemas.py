@@ -164,6 +164,23 @@ class TotpIn(BaseModel):
     code: str = Field(max_length=10)
 
 
+class SignupStartIn(BaseModel):
+    name: str = Field(max_length=120)
+    phone: str = Field(max_length=32)
+    email: Optional[str] = Field(default=None, max_length=200)
+    per_week: int = Field(default=3, ge=1, le=14)       # what the order says
+    starts_on: Optional[datetime] = None
+
+
+class SignupVerifyIn(BaseModel):
+    phone: str = Field(max_length=32)
+    code: str = Field(max_length=10)
+
+
+class CheckoutSyncIn(BaseModel):
+    session_id: str = Field(max_length=120)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

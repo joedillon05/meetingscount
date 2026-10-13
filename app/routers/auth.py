@@ -27,7 +27,7 @@ from ..auth import (
     audit, clear_session_cookie, client_ip, current_user, end_all_sessions, end_session,
     require, set_session_cookie, start_session,
 )
-from .. import confirming, sms
+from .. import billing, confirming, sms
 from ..config import settings
 from ..db import get_db
 from ..models import LoginCode, Participant, Role, User
@@ -85,6 +85,7 @@ def context(db: Session = Depends(get_db)):
     out = {"demo": settings.DEMO, "dev_auth": settings.DEV_AUTH,
            "staff_password": True, "participant_code": True,
            "texting": settings.sms_configured,
+           "self_signup": billing.signup_open(),
            "directory": bool(db.scalar(select(func.count(MeetingSeries.id))
                                        .where(MeetingSeries.active.is_(True))))}
     if settings.DEMO:

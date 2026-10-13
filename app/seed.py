@@ -25,7 +25,8 @@ from .confirming import expires as link_expires, new_token
 from .models import (
     AuditLog, Base, CheckIn, CheckInStatus, Confirmation, ConfirmationStatus, Confirmer, County,
     Dispute, Meeting, MeetingCategory, MeetingSeries, MeetingSource, Participant, Program,
-    Requirement, RequirementPeriod, Review, ReviewDecision, Role, SmsLog, SmsOptOut, User,
+    Requirement, RequirementPeriod, Review, ReviewDecision, Role, Signup, SmsLog, SmsOptOut,
+    Subscription, User,
 )
 from .routers.auth import DEMO_PASSWORD
 from .security import hash_password
@@ -84,7 +85,8 @@ def _wipe(db) -> None:
             db.commit()
         return
     for model in (AuditLog, SmsLog, SmsOptOut, Confirmation, Confirmer, Review, Dispute,
-                  CheckIn, Requirement, Meeting, Participant, User, Program, County):
+                  CheckIn, Requirement, Meeting, Subscription, Signup, Participant, User,
+                  Program, County):
         db.execute(delete(model))
     db.commit()
 

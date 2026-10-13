@@ -1,0 +1,31 @@
+/* The create-a-profile page. One column, one thing at a time, the same
+   shapes as the participant sign-in so it feels like the same app. */
+
+.join-body { background: var(--surface); color: var(--ink); min-height: 100dvh; }
+.join {
+  max-width: 440px; margin: 0 auto; display: grid; gap: 14px;
+  padding: calc(40px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom));
+}
+.join-head { display: flex; align-items: center; gap: 9px; font-weight: 700; margin-bottom: 14px; }
+.join-head .logo { width: 30px; height: 30px; }
+.join h1 { font-size: 30px; line-height: 1.12; letter-spacing: -.025em; font-weight: 780; text-wrap: balance; }
+.join form { display: grid; gap: 8px; margin-top: 6px; }
+.join label { font-size: 14px; font-weight: 650; color: var(--ink-2); margin-top: 6px; }
+.join label .muted { font-weight: 500; }
+.join .btn { margin-top: 10px; }
+.join .btn + .btn { margin-top: 0; }
+.join .err { color: var(--bad); font-weight: 600; font-size: 14px; }
+.join .err[hidden] { display: none; }
+.join .fine a { color: var(--brand); }
+.join .steps { display: flex; gap: 6px; margin-bottom: 6px; }
+.join .steps i { flex: 1; height: 4px; border-radius: 99px; background: var(--line); }
+.join .steps i.on { background: var(--brand); }
+.code-input { font-size: 30px; letter-spacing: .34em; text-align: center; font-variant-numeric: tabular-nums;
+  padding: 14px 10px; font-weight: 700; }
+b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nums; }
+.price { display: grid; gap: 4px; padding: 16px; border-radius: var(--r); background: var(--surface-2); margin-top: 4px; }
+.price b { font-size: 24px; letter-spacing: -.01em; }
+.price .ic { color: var(--ok-strong); }
+.join .hero-ic { margin: 4px 0 2px; }
+.join .plain { margin-top: 4px; }
+.join .center { justify-items: center; text-align: center; }

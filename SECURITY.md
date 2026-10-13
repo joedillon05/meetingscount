@@ -46,6 +46,7 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 | Caching | Every API response is `no-store`, so no browser or proxy keeps personal data | `app/main.cache_rules` |
 | Asking someone to confirm | The person asked gets a first name, the meeting and the time, and a single-use link that stops working after 7 days. Only the hash of the link token is stored. Nothing says why the participant keeps track. The participant cannot ask their own number, asks at most three people per check-in, and cannot text a number that said STOP | `app/routers/confirmations.py` |
 | Texts | Every text is logged with the link token blanked out. STOP, whether Twilio hears it or the app does, stops all texts to that number. Twilio's webhooks are checked against the account's signature and refused otherwise | `app/sms.py` |
+| Payments | Cards are typed on Stripe's hosted pages, never here; the app stores a customer id, a subscription id and a status. Checkout links are minted server-side for the signed-in person only, a returned checkout session must belong to that person's own customer, and Stripe's webhooks are checked against the endpoint secret, with a five-minute clock tolerance, before the body is parsed. A profile is created only after a texted code proves the phone, and the reply to "send a code" never says whether a number is already on file | `app/billing.py`, `app/routers/signup.py`, `app/routers/billing.py` |
 
 ## Decisions about people
 
@@ -103,6 +104,10 @@ it is hidden from a reviewer.
 8. **Demo helpers.** With `MC_DEMO=1` the sign-in screen lists demo accounts
    and shows participant codes. The app refuses to start with it on when
    `MC_ENV=production`, and it must never be on with real data.
+9. **Nobody reviews a self-serve profile's flagged check-ins.** The self-pay
+   county has no officers, so a flagged check-in there waits as pending
+   until a superuser looks. A way for the person to name their own officer,
+   or a support queue, is needed before self-serve is sold widely.
 
 ## Reporting a problem
 

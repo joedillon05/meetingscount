@@ -99,6 +99,22 @@ class Settings:
     # How long a confirmation link stays usable.
     CONFIRM_LINK_DAYS: int = int(os.environ.get("MC_CONFIRM_LINK_DAYS", "7"))
 
+    # Self-serve profiles, paid through Stripe. Someone whose county is not
+    # on MeetingsCount creates their own profile at /join, proves the phone
+    # is theirs with a code, and pays for a subscription on Stripe's hosted
+    # checkout page. No card number ever reaches this app. MC_STRIPE_PRICE_ID
+    # is the recurring price to sell (price_...), made in the Stripe
+    # dashboard, so the amount lives there and not in code.
+    SELF_SIGNUP: bool = _bool("MC_SELF_SIGNUP", True)
+    STRIPE_SECRET_KEY: str = os.environ.get("MC_STRIPE_SECRET_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.environ.get("MC_STRIPE_WEBHOOK_SECRET", "")
+    STRIPE_PRICE_ID: str = os.environ.get("MC_STRIPE_PRICE_ID", "")
+    STRIPE_TRIAL_DAYS: int = int(os.environ.get("MC_STRIPE_TRIAL_DAYS", "0"))
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.STRIPE_SECRET_KEY and self.STRIPE_PRICE_ID)
+
     @property
     def sms_configured(self) -> bool:
         return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and self.TWILIO_FROM)

@@ -4,6 +4,7 @@ MeetingsCount API.
     uvicorn app.main:app --reload
 
     /              participant check-in (phone)
+    /join          create your own profile and pay for it
     /officer       officer dashboard: caseload, review queue, participant detail
     /ops           map, simulator, engine internals (developer tool)
     /docs          API reference
@@ -32,7 +33,8 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import create_all
 from .routers import (
-    admin, auth, caseload, checkins, confirmations, directory, me, meetings, reports, reviews,
+    admin, auth, billing, caseload, checkins, confirmations, directory, me, meetings, reports,
+    reviews, signup,
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -83,7 +85,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router, confirmations.router,
-          directory.router):
+          directory.router, signup.router, billing.router):
     app.include_router(r)
 
 
@@ -118,9 +120,9 @@ async def preview_gate(request, call_next):
     MC_ACCESS_PASSWORD is set. For demo deployments only: see the note in
     config.Settings.ACCESS_PASSWORD.
     """
-    # Twilio cannot type a password. Its two webhooks check its signature instead.
+    # Twilio and Stripe cannot type a password. Their webhooks check a signature instead.
     if not settings.ACCESS_PASSWORD or request.url.path in (
-            "/healthz", "/api/sms/inbound", "/api/sms/status"):
+            "/healthz", "/api/sms/inbound", "/api/sms/status", "/api/billing/webhook"):
         return await call_next(request)
     given = ""
     header = request.headers.get("authorization", "")
@@ -184,6 +186,12 @@ def ops():
 def admin_redirect():
     # The old URL from v2. Keep it working.
     return FileResponse(os.path.join(STATIC_DIR, "officer.html"))
+
+
+@app.get("/join", include_in_schema=False)
+def join_page():
+    """Create a profile on your own and pay for it. Sign-in stays at /."""
+    return FileResponse(os.path.join(STATIC_DIR, "join.html"))
 
 
 @app.get("/report", include_in_schema=False)

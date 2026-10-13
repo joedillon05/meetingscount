@@ -119,7 +119,14 @@ async function boot() {
   if (S.me.role !== 'participant') return renderStaffHere();
   setTimeZone(S.me.timezone);
 
+  enter();
+}
+
+/* What stands between a signed-in person and Today: the consent screen,
+   then, for a self-serve profile, a live subscription. */
+function enter() {
   if (S.me.consent.required) return renderConsent();
+  if (S.me.billing && !S.me.billing.active) return renderPayWall();
   start();
 }
 
@@ -1080,6 +1087,8 @@ function viewYou() {
       </dl>
     </section>
 
+    ${billingCard()}
+
     <section class="card" aria-labelledby="h-priv">
       <h2 class="sec flush" id="h-priv">${icon('shield')} Your privacy</h2>
       <ul class="plain">
@@ -1164,7 +1173,7 @@ function switchUser() {
 function renderConsent() {
   document.body.classList.add('bare');
   const me = S.me, pol = me.policy, years = Math.round(pol.record_retention_days / 365);
-  const officer = me.officer || 'Your officer';
+  const officer = me.officer || (me.billing ? 'Whoever you share your record with' : 'Your officer');
   app.innerHTML = `<main class="consent">
     <div class="consent-head">${logo()}<p class="muted">MeetingsCount${me.county ? ` for ${esc(me.county)}` : ''}</p></div>
     <h1>Before your first check&#8209;in</h1>
@@ -1189,12 +1198,53 @@ function renderConsent() {
     try {
       await api('/api/my/consent', { method: 'POST', body: JSON.stringify({ version: me.consent.version }) });
       S.me = await api('/api/me');
-      start();
+      enter();
     } catch (e) { $('#agree').disabled = false; toast(e.message); }
   };
 }
 
-/* ---------- other states ---------- */
+/* ---------- paying for your own profile ---------- */
+
+/* Only a self-serve profile ever sees this. Someone a county enrolled has
+   no billing at all. */
+function renderPayWall() {
+  document.body.classList.add('bare');
+  const b = S.me.billing;
+  app.innerHTML = `<main class="consent">
+    <div class="consent-head">${logo()}<p class="muted">MeetingsCount</p></div>
+    <h1>${b.status === 'unpaid_yet' ? 'One more step' : 'Your subscription needs attention'}</h1>
+    <p class="lead">${esc(b.words)}</p>
+    ${b.price ? `<p class="callout">${icon('note')} <span>${esc(b.price.label)}. Cancel any time from here.</span></p>` : ''}
+    ${b.payment ? `<button class="btn block big" data-act="${b.can_pay ? 'pay' : 'portal'}" type="button">${b.can_pay ? 'Continue to payment' : 'Manage billing'}</button>`
+      : `<p class="callout warn">${icon('alert')} Payment is not set up on this server yet.</p>`}
+    <button class="btn block ghost" data-act="signout" type="button">Sign out</button>
+    <p class="fine center">Check-ins are paused until the subscription is active. Your record is kept.</p>
+  </main>`;
+}
+
+/* Hand the person to a Stripe page. The link is minted for this profile only. */
+async function stripePage(path) {
+  const btn = document.querySelector(`[data-act="${path.endsWith('checkout') ? 'pay' : 'portal'}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening'; }
+  try {
+    const r = await api(path, { method: 'POST' });
+    location.href = r.url;
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = path.endsWith('checkout') ? 'Continue to payment' : 'Manage billing'; }
+    toast(e.message, { ms: 5000 });
+  }
+}
+
+function billingCard() {
+  const b = S.me.billing;
+  if (!b) return '';
+  return `<section class="card" aria-labelledby="h-bill">
+    <h2 class="sec flush" id="h-bill">${icon('file')} Your subscription</h2>
+    <p class="small" style="margin-top:6px">${esc(b.words)}${b.price ? ` <span class="muted">${esc(b.price.label)}.</span>` : ''}</p>
+    ${b.payment && b.can_pay ? `<button class="btn block" data-act="pay" type="button" style="margin-top:12px">Continue to payment</button>` : ''}
+    ${b.payment && b.can_manage ? `<button class="btn secondary block" data-act="portal" type="button" style="margin-top:12px">Manage billing</button>` : ''}
+  </section>`;
+}
 
 /* ---------- signing in ---------- */
 
@@ -1215,6 +1265,7 @@ function renderSignIn(phone = '') {
       <button class="btn block big" type="submit">Continue</button>
     </form>
     <p class="fine center">Trouble signing in? Your officer can read you a code.</p>
+    ${S.ctx.self_signup ? `<p class="fine center">No profile yet? <a href="/join">Create one</a></p>` : ''}
   </main>`;
   const input = $('#phone');
   input.focus();
@@ -1319,6 +1370,8 @@ app.addEventListener('click', e => {
     install,
     switch: switchUser,
     signout: signOut,
+    pay: () => stripePage('/api/billing/checkout'),
+    portal: () => stripePage('/api/billing/portal'),
     retry: () => { S.loadError = null; renderTab(); refresh(); },
     reload: () => location.reload(),
   })[t.dataset.act]?.();

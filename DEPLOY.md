@@ -84,6 +84,64 @@ someone says a text never came.
 Expect about a cent per message segment and a few dollars a month for the
 number, at Twilio's current prices. A confirmation ask is two segments.
 
+## Payments, through Stripe
+
+`/join` lets someone create their own profile and pay for it. Until the
+three Stripe settings below are set, that page works only in demo mode
+(free "demo" profiles, code shown on screen) and is closed everywhere else.
+It also needs Twilio, because the phone number is proven with a text.
+
+In the Stripe dashboard, with **Test mode** on until the real launch:
+
+1. **Products → Add product.** One product ("MeetingsCount"), one recurring
+   price (for example $12 a month). Copy the price id, `price_...`. The
+   amount lives in Stripe; changing it is a new price, and a new id here.
+2. **Developers → API keys.** Copy the secret key, `sk_test_...` (later
+   `sk_live_...`). Never the publishable key: the app does not use it.
+3. **Developers → Webhooks → Add endpoint.** URL
+   `https://actionscountplus.com/api/billing/webhook`. Events:
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`,
+   `customer.subscription.paused`, `customer.subscription.resumed`. Copy the
+   signing secret, `whsec_...`. Every call is checked against it and refused
+   otherwise, and the webhook is the one path besides Twilio's that
+   `MC_ACCESS_PASSWORD` lets through.
+4. **Settings → Billing → Customer portal.** Turn it on, and allow customers
+   to update payment methods and cancel subscriptions. The app's **Manage
+   billing** button opens this portal.
+
+Then, the same way as Twilio, one per line and Ctrl-D:
+
+```bash
+fly secrets import
+```
+
+```
+MC_STRIPE_SECRET_KEY=sk_test_...
+MC_STRIPE_WEBHOOK_SECRET=whsec_...
+MC_STRIPE_PRICE_ID=price_...
+```
+
+Optional: `MC_STRIPE_TRIAL_DAYS=7` for a free trial before the first charge,
+and `MC_SELF_SIGNUP=0` to close `/join` entirely on a deployment that is for
+one county only.
+
+To try it in test mode, open `/join` on the preview, create a profile with
+a number on `MC_SMS_ALLOW`, and pay with Stripe's test card `4242 4242 4242
+4242`, any future date, any CVC. The dashboard's **Customers** page shows
+the person; `/officer` → **Audit log** shows every webhook that arrived and
+what it did. Cancelling from the portal, or from the Stripe dashboard,
+switches check-in off within seconds.
+
+Going live is the same three secrets from the live-mode dashboard, a new
+webhook endpoint made in live mode, and a live price id. Stripe's fee is
+2.9% plus 30 cents a charge at the time of writing, and the subscription
+amount is yours to set.
+
+Note that no card number, expiry or CVC ever reaches this app. Checkout and
+the portal are Stripe pages on Stripe's domain; the app stores a customer
+id, a subscription id and a status word.
+
 ## The meeting directory
 
 `fly.toml` names `MC_DIRECTORY_FILE`, and the container imports that list

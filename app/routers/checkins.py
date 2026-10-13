@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import confirming
+from .. import billing, confirming
 from ..auth import audit, client_ip, current_user
 from ..config import settings
 from ..db import get_db
@@ -58,6 +58,7 @@ def check_in(body: CheckInIn, request: Request, response: Response,
     if not meeting_visible_to(m, user):
         raise HTTPException(404, "meeting not found")
     require_consent(user)
+    billing.require_paid(db, user)
 
     # A second tap on a meeting that already has a standing check-in returns
     # that check-in instead of making a new one. Retrying after a rejection

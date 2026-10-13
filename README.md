@@ -19,6 +19,7 @@ uvicorn app.main:app --reload
 |---|---|
 | `/officer` | Probation officer: caseload, review queue, participant records, reports. Admins also get the audit log |
 | `/` | Participant app (installable on a phone): consent, one-tap check-in and check-out, this week's progress, full history with every reason and every officer decision |
+| `/join` | Someone whose county is not on MeetingsCount: create your own profile, prove the phone with a code, pay on Stripe's page. Open in demo mode, or when Stripe and Twilio are set up |
 | `/confirm/<token>` | The person a participant asked to confirm a check-in: one link from a text, no sign-in |
 | `/ops` | Developer: map of every check-in, and a simulator that needs no phone |
 | `/docs` | API reference |
@@ -29,7 +30,7 @@ participants. Each page remembers its own person, so being Aisha on the phone
 page never changes who you are on the dashboard.
 
 ```bash
-python -m pytest                    # 54 tests
+python -m pytest                    # 138 tests
 ```
 
 ### With Postgres, the way production runs
@@ -202,16 +203,20 @@ app/
   sms.py           Twilio, the text log, opt-outs, webhook signatures
   directory.py     the meeting directory: importing a list, weekly meetings
                    into dated ones, what is near a town
+  billing.py       self-serve profiles and their Stripe subscription: the
+                   self-pay county, checkout and portal links, webhooks
   seed.py          the demo county
   routers/         me (the signed-in person's own record), meetings, checkins,
                    caseload, reviews, reports, admin, confirmations (asks,
-                   the public answer page, Twilio webhooks), directory
+                   the public answer page, Twilio webhooks), directory,
+                   signup (/join), billing (Stripe links and its webhook)
 tools/import_meetings.py   bring an area's meeting list into the directory
 data/              the meeting lists that ship with the app
 static/
   officer.html     the staff dashboard shell
   index.html       the participant app shell
   confirm.html     the page a sponsor opens from a text (app/confirm.js)
+  join.html        create your own profile and pay for it (app/join.js)
   app/             tokens.css + base.css (shared design system), lib.js
                    (shared helpers), participant.*, officer.js + officer.css,
                    queue.js (the review queue)
@@ -221,6 +226,24 @@ alembic/           migrations, including Postgres row-level security
 infra/             CDK stack for AWS, not deployed yet. See infra/README.md
 tests/
 ```
+
+## Paying for your own profile
+
+Counties enrol their participants and never see a price. `/join` is for
+everyone else: someone under an order whose court is not on MeetingsCount.
+They enter their name, mobile number and what the order requires, prove the
+number with a texted code, and the profile exists. Then Stripe's hosted
+checkout takes the card; the app only ever sees ids and a status. Self-serve
+profiles live in one county of their own, "Self-pay", which has no officers.
+
+A profile without a live subscription can sign in and read its record, but
+cannot check in. `past_due` keeps working while Stripe retries the card;
+`canceled` and `unpaid` do not. The status is kept current by Stripe's
+webhooks and by a sync when the person comes back from checkout. Under
+**You**, the person sees their subscription and a **Manage billing** button
+that opens Stripe's portal to change the card or cancel.
+
+Setting it up, and what it costs, is in `DEPLOY.md`.
 
 ## Security posture
 
