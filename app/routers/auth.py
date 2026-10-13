@@ -101,10 +101,15 @@ def demo_accounts(db: Session = Depends(get_db)):
     """The seeded accounts, so a demo can be driven from the sign-in screen."""
     if not settings.DEMO:
         raise HTTPException(404, "not available")
+    # Only people in a seeded county. Someone who made their own profile at
+    # /join is real, whatever mode the server is in.
+    from ..models import County
+    demo_counties = select(County.id).where(County.self_serve.is_(False))
     staff = db.scalars(select(User).where(User.role.in_([Role.officer, Role.admin]),
-                                          User.active.is_(True)).order_by(User.role)).all()
-    parts = db.scalars(select(User).where(User.role == Role.participant,
-                                          User.active.is_(True)).order_by(User.name)).all()
+                                          User.active.is_(True),
+                                          User.county_id.in_(demo_counties)).order_by(User.role)).all()
+    parts = db.scalars(select(User).where(User.role == Role.participant, User.active.is_(True),
+                                          User.county_id.in_(demo_counties)).order_by(User.name)).all()
     return {
         "password": DEMO_PASSWORD,
         "staff": [{"name": u.name, "email": u.email, "role": u.role.value} for u in staff if u.email],

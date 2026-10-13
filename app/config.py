@@ -106,6 +106,11 @@ class Settings:
     # is the recurring price to sell (price_...), made in the Stripe
     # dashboard, so the amount lives there and not in code.
     SELF_SIGNUP: bool = _bool("MC_SELF_SIGNUP", True)
+    # MC_PAYMENTS=0 switches Stripe off without unsetting the secrets, so a
+    # site can drop back to free demo profiles and come back later with one
+    # line in fly.toml. With payments off nobody is ever asked to pay and no
+    # profile is blocked for not having paid.
+    PAYMENTS: bool = _bool("MC_PAYMENTS", True)
     STRIPE_SECRET_KEY: str = os.environ.get("MC_STRIPE_SECRET_KEY", "")
     STRIPE_WEBHOOK_SECRET: str = os.environ.get("MC_STRIPE_WEBHOOK_SECRET", "")
     STRIPE_PRICE_ID: str = os.environ.get("MC_STRIPE_PRICE_ID", "")
@@ -113,7 +118,7 @@ class Settings:
 
     @property
     def stripe_configured(self) -> bool:
-        return bool(self.STRIPE_SECRET_KEY and self.STRIPE_PRICE_ID)
+        return self.PAYMENTS and bool(self.STRIPE_SECRET_KEY and self.STRIPE_PRICE_ID)
 
     @property
     def sms_configured(self) -> bool:

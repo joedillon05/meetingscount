@@ -205,8 +205,8 @@ def status_out(db: Session, user: User) -> dict | None:
     if row is None:
         return None
     return {
-        "status": row.status, "active": row.active,
-        "words": status_words(row),
+        "status": row.status, "active": row.active or not settings.stripe_configured,
+        "words": status_words(row) if settings.stripe_configured else "No payment is needed here.",
         "current_period_end": row.current_period_end.isoformat() if row.current_period_end else None,
         "cancel_at_period_end": row.cancel_at_period_end,
         "payment": settings.stripe_configured,
@@ -237,7 +237,9 @@ def status_words(row: Subscription) -> str:
 
 
 def require_paid(db: Session, user: User) -> None:
-    """A self-serve participant cannot check in without a live subscription."""
+    """A self-serve participant cannot check in without a live subscription, while payments are on."""
+    if not settings.stripe_configured:
+        return
     row = row_for(db, user)
     if row is not None and not row.active:
         raise HTTPException(402, "Your subscription is not active. Set up payment under You, "

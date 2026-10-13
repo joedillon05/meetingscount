@@ -15,11 +15,18 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
 
 [build]
 
+# Two settings decide whether this is a demo or a live site. Flip all three
+# lines together and `fly deploy`; see "Demo or live" in DEPLOY.md.
+#
+#   demo:  MC_ENV = "demo"        MC_DEMO = "1"   MC_PAYMENTS = "0"
+#   live:  MC_ENV = "production"  MC_DEMO = "0"   MC_PAYMENTS = "1"
+#
 [env]
-  MC_ENV = "production"            # refuses to boot if either switch below is on
-  MC_DEMO = "0"                    # no demo accounts on the sign-in screen, no codes on screen
+  MC_ENV = "demo"                  # "production" refuses to boot with MC_DEMO on
+  MC_DEMO = "1"                    # sign-in codes show on screen for numbers not on MC_SMS_ALLOW
+  MC_PAYMENTS = "0"                # Stripe off: free profiles, no paywall; the secrets stay set
   MC_DEV_AUTH = "0"                # no header shortcut: sign-in is real
-  MC_SEED_ON_BOOT = "0"            # never put the demo county into a live database
+  MC_SEED_ON_BOOT = "0"            # never put the demo county into this database
   MC_DIRECTORY_FILE = "data/semi-aa-meetings-2026-01-28.csv"   # the meeting directory, first boot only
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"

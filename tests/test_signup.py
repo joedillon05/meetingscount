@@ -542,3 +542,36 @@ def test_signatures_match_stripes_scheme():
     assert not billing.signature_ok(body, header, "whsec_b", now=1_700_000_100)
     assert not billing.signature_ok(body + b" ", header, "whsec_a", now=1_700_000_100)
     assert not billing.signature_ok(body, header, "whsec_a", now=1_700_001_000)
+
+
+# --------------------------------------------------------------------------- #
+# Payments switched off
+# --------------------------------------------------------------------------- #
+
+def test_payments_off_keeps_the_secrets_but_gates_nobody(client, stripe, monkeypatch):
+    fake, phones = stripe
+    _join(client, phones)                      # a profile made while payments were on
+    _consent(client)
+    meeting = _open_meeting()
+    assert _check_in(client, meeting).status_code == 402
+
+    monkeypatch.setattr(settings, "PAYMENTS", False)
+    assert settings.stripe_configured is False
+    b = _me(client)["billing"]
+    assert b["active"] is True and b["payment"] is False and b["words"] == "No payment is needed here."
+    assert _check_in(client, meeting).status_code == 201
+    assert client.post("/api/billing/checkout").status_code == 409
+    ctx = client.get("/api/signup/context").json()
+    assert ctx["payment"] is False and ctx["open"] is False      # live, no payments: closed
+
+    monkeypatch.setattr(settings, "DEMO", True)
+    assert client.get("/api/signup/context").json()["open"] is True
+
+
+def test_the_demo_account_list_never_names_a_self_serve_person(client, stripe, monkeypatch):
+    fake, phones = stripe
+    me = _join(client, phones, name="Real Person")
+    monkeypatch.setattr(settings, "DEMO", True)
+    listed = client.get("/api/auth/demo-accounts").json()
+    assert all(p["name"] != "Real Person" for p in listed["participants"])
+    assert me["name"] == "Real Person"

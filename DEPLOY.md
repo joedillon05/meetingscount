@@ -322,6 +322,29 @@ them, and take a copy before anything risky:
 fly ssh sftp get /data/meetingscount.db ./backup-$(date +%F).db
 ```
 
+## Demo or live
+
+The site can go back and forth. Three lines in `fly.toml`, then `fly deploy`:
+
+| | demo | live |
+|---|---|---|
+| `MC_ENV` | `demo` | `production` |
+| `MC_DEMO` | `1` | `0` |
+| `MC_PAYMENTS` | `0` | `1` |
+
+In demo: sign-in and sign-up codes show on screen for any number not on
+`MC_SMS_ALLOW`, so nobody is stuck waiting on a text while the Twilio
+number is being registered; `/join` makes free profiles with no card and
+nobody is ever blocked for not paying; the Stripe secrets stay where they
+are, unused. Nothing is seeded, so there are no demo accounts unless you
+add the demo county back with `python -m app.seed`, which also wipes the
+database on SQLite, so do not.
+
+In live: codes go by text to any number, `/join` takes real payments, and a
+profile without a live subscription cannot check in. Flip the three lines
+back and deploy. Profiles made while payments were off have no
+subscription yet, so the next time they open the app they are asked to pay.
+
 ## Before real participants
 
 In order, because each one depends on the last:
