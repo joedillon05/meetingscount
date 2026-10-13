@@ -5,10 +5,10 @@
 #   fly secrets set MC_SECRET_KEY=$(openssl rand -hex 32)
 #   fly deploy
 #
-# Demo data. Sign-in is real (staff use a password, participants a one-time
-# code), but MC_DEMO=1 lists the demo accounts on the sign-in screen and shows
-# participant codes on screen, so this configuration is for the seeded county
-# only. See DEPLOY.md before putting anyone real in it.
+# Live: demo mode off, no seeding, and the app refuses to boot if either
+# demo switch is turned back on. Staff sign in with a password, participants
+# with a code sent by text, and /join takes real payments through Stripe.
+# "Going live" in DEPLOY.md is the checklist that goes with this file.
 
 app = "meetingscount-preview"
 primary_region = "ord"            # Chicago, the closest region to Michigan
@@ -16,9 +16,10 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
 [build]
 
 [env]
-  MC_DEMO = "1"
+  MC_ENV = "production"            # refuses to boot if either switch below is on
+  MC_DEMO = "0"                    # no demo accounts on the sign-in screen, no codes on screen
   MC_DEV_AUTH = "0"                # no header shortcut: sign-in is real
-  MC_SEED_ON_BOOT = "1"
+  MC_SEED_ON_BOOT = "0"            # never put the demo county into a live database
   MC_DIRECTORY_FILE = "data/semi-aa-meetings-2026-01-28.csv"   # the meeting directory, first boot only
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"

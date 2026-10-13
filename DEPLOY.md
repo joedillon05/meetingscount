@@ -232,6 +232,65 @@ Two other things worth doing on the phone: add it to the home screen from the
 share menu, and check in from inside a building to see the accuracy warning
 and the review queue pick it up.
 
+## Going live
+
+The order matters: the demo county holds staff accounts whose password is
+printed in the README, so it has to go before the demo helpers do, and you
+need an account of your own before it goes.
+
+`fly.toml` already carries the live settings: `MC_ENV=production`,
+`MC_DEMO=0`, `MC_SEED_ON_BOOT=0`. With `MC_ENV=production` the app refuses
+to boot if either demo switch is turned back on.
+
+1. **Deploy the live settings.**
+
+   ```bash
+   fly deploy
+   ```
+
+2. **Make your own account.** A superuser sees every county, including the
+   self-pay one, so you can review a self-serve person's flagged check-ins
+   and read the audit log. The first password is printed once; the dashboard
+   makes you choose your own at first sign-in.
+
+   ```bash
+   fly ssh console -u appuser -C "python tools/make_staff.py --name 'Joe Dillon' --email you@example.com --role superuser"
+   ```
+
+   Sign in at `https://actionscountplus.com/officer` and change the password
+   before the next step.
+
+3. **Delete the demo county.** First see what would go, then delete it. The
+   meeting directory and the self-pay county are untouched.
+
+   ```bash
+   fly ssh console -u appuser -C "python tools/retire_demo.py --dry-run"
+   ```
+
+   ```bash
+   fly ssh console -u appuser -C "python tools/retire_demo.py --yes"
+   ```
+
+   The published demo password now opens nothing. Any county that signs up
+   later gets its own admin account from `make_staff.py` with `--role admin
+   --county "Their County"`.
+
+What changes with demo mode off: the sign-in screen lists no accounts and
+shows no codes; sign-in and sign-up codes go by text to any number, so
+`MC_SMS_ALLOW` no longer applies and the Twilio number has to be registered
+to reach US carriers (see Texts, above); `/join` is open only while Stripe
+and Twilio are both configured; the simulator on `/ops` can no longer send
+fake timestamps; and `/docs` is switched off.
+
+What a live preview still is not: see the list below, in particular backups.
+The SQLite file on the Fly volume gets a daily snapshot that Fly keeps for a
+few days, and nothing else. Run `fly volumes snapshots list mc_data` to see
+them, and take a copy before anything risky:
+
+```bash
+fly ssh sftp get /data/meetingscount.db ./backup-$(date +%F).db
+```
+
 ## Before real participants
 
 In order, because each one depends on the last:
