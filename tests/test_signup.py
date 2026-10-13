@@ -39,6 +39,15 @@ class FakeStripe:
     def __init__(self):
         self.customers, self.subscriptions, self.sessions, self.calls = {}, {}, {}, []
         self.refuse = None            # an error to raise instead of answering
+        # Promotion codes made in the dashboard: a free year for demos, and
+        # one that has been used up.
+        self.promotions = {
+            "FREEYEAR": {"id": "promo_free", "code": "FREEYEAR", "active": True,
+                         "coupon": {"id": "year", "percent_off": 100, "duration": "repeating",
+                                    "duration_in_months": 12, "valid": True}},
+            "GONE": {"id": "promo_gone", "code": "GONE", "active": True, "max_redemptions": 5,
+                     "times_redeemed": 5, "coupon": {"id": "x", "percent_off": 100, "valid": True}},
+        }
 
     def post(self, path, data, *, idempotency_key=None):
         self.calls.append(("POST", path, data))
@@ -67,6 +76,9 @@ class FakeStripe:
         if path.startswith("/v1/prices/"):
             return {"id": path.rsplit("/", 1)[1], "unit_amount": 1200, "currency": "usd",
                     "recurring": {"interval": "month", "interval_count": 1}}
+        if path == "/v1/promotion_codes":
+            p = self.promotions.get((params or {}).get("code", "").upper())
+            return {"data": [p] if p else []}
         if path.startswith("/v1/checkout/sessions/"):
             s = self.sessions.get(path.rsplit("/", 1)[1])
             if not s:
@@ -376,6 +388,51 @@ def test_checkout_then_the_webhook_turns_the_profile_on(client, stripe):
     r = client.post("/api/billing/portal")
     assert r.status_code == 200 and r.json()["url"].startswith("https://billing.stripe.com/")
     assert fake.calls[-1][2]["return_url"] == "https://app.example/#you"
+
+
+def test_the_first_month_free_rides_on_checkout_with_the_card_up_front(client, stripe, monkeypatch):
+    fake, phones = stripe
+    monkeypatch.setattr(settings, "STRIPE_TRIAL_DAYS", 30)
+    assert client.get("/api/signup/context").json()["trial"] == "First month free"
+    me = _join(client, phones)
+    assert me["billing"]["trial"] == "First month free"
+    _checkout(client, fake)
+    sent = next(d for m, p, d in fake.calls if p == "/v1/checkout/sessions")
+    assert sent["subscription_data[trial_period_days]"] == "30"
+    assert "discounts[0][promotion_code]" not in sent and "payment_method_collection" not in sent
+
+
+def test_a_promotion_code_replaces_the_trial_and_needs_no_card(client, stripe, monkeypatch):
+    fake, phones = stripe
+    monkeypatch.setattr(settings, "STRIPE_TRIAL_DAYS", 30)
+    _join(client, phones)
+    r = client.post("/api/billing/checkout", json={"code": " freeyear "})
+    assert r.status_code == 200, r.text
+    sent = next(d for m, p, d in fake.calls if p == "/v1/checkout/sessions")
+    assert sent["discounts[0][promotion_code]"] == "promo_free"
+    assert sent["payment_method_collection"] == "if_required"
+    assert "subscription_data[trial_period_days]" not in sent
+
+    r = client.post("/api/billing/checkout", json={"code": "NOPE"})
+    assert r.status_code == 422 and "not valid" in r.json()["detail"]
+    r = client.post("/api/billing/checkout", json={"code": "GONE"})
+    assert r.status_code == 422, "a used-up code was accepted"
+    assert client.post("/api/billing/checkout", json={"code": ""}).status_code == 200
+
+
+def test_code_guessing_is_rate_limited(client, stripe):
+    fake, phones = stripe
+    _join(client, phones)
+    for _ in range(10):
+        assert client.post("/api/billing/checkout", json={"code": "NOPE"}).status_code == 422
+    assert client.post("/api/billing/checkout", json={"code": "FREEYEAR"}).status_code == 429
+
+
+def test_trial_words():
+    assert billing.trial_words(0) is None
+    assert billing.trial_words(30) == "First month free"
+    assert billing.trial_words(31) == "First month free"
+    assert billing.trial_words(14) == "First 14 days free"
 
 
 def test_back_from_checkout_the_app_syncs_without_waiting_for_the_webhook(client, stripe):

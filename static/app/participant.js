@@ -1214,9 +1214,15 @@ function renderPayWall() {
     <div class="consent-head">${logo()}<p class="muted">MeetingsCount</p></div>
     <h1>${b.status === 'unpaid_yet' ? 'One more step' : 'Your subscription needs attention'}</h1>
     <p class="lead">${esc(b.words)}</p>
-    ${b.price ? `<p class="callout">${icon('note')} <span>${esc(b.price.label)}. Cancel any time from here.</span></p>` : ''}
+    ${b.price ? `<p class="callout">${icon('note')} <span>${b.trial ? `${esc(b.trial)}, then ${esc(b.price.label)}` : esc(b.price.label)}. Cancel any time from here.</span></p>` : ''}
     ${b.payment ? `<button class="btn block big" data-act="${b.can_pay ? 'pay' : 'portal'}" type="button">${b.can_pay ? 'Continue to payment' : 'Manage billing'}</button>`
       : `<p class="callout warn">${icon('alert')} Payment is not set up on this server yet.</p>`}
+    ${b.payment && b.can_pay ? `<details class="promo">
+      <summary>Have a code?</summary>
+      <label for="code">Promotion code</label>
+      <input id="code" name="code" autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="For example FREEYEAR">
+      <p class="fine">Applied on the next page. With a code that covers the whole cost, no card is asked for.</p>
+    </details>` : ''}
     <button class="btn block ghost" data-act="signout" type="button">Sign out</button>
     <p class="fine center">Check-ins are paused until the subscription is active. Your record is kept.</p>
   </main>`;
@@ -1226,8 +1232,9 @@ function renderPayWall() {
 async function stripePage(path) {
   const btn = document.querySelector(`[data-act="${path.endsWith('checkout') ? 'pay' : 'portal'}"]`);
   if (btn) { btn.disabled = true; btn.textContent = 'Opening'; }
+  const code = ($('#code')?.value || '').trim();
   try {
-    const r = await api(path, { method: 'POST' });
+    const r = await api(path, { method: 'POST', body: JSON.stringify(code ? { code } : {}) });
     location.href = r.url;
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = path.endsWith('checkout') ? 'Continue to payment' : 'Manage billing'; }

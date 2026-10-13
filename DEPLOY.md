@@ -122,9 +122,40 @@ MC_STRIPE_WEBHOOK_SECRET=whsec_...
 MC_STRIPE_PRICE_ID=price_...
 ```
 
-Optional: `MC_STRIPE_TRIAL_DAYS=7` for a free trial before the first charge,
-and `MC_SELF_SIGNUP=0` to close `/join` entirely on a deployment that is for
-one county only.
+`MC_STRIPE_TRIAL_DAYS` (in `fly.toml`, 30 today) makes the first month free:
+checkout takes the card and Stripe charges nothing until the trial ends.
+The join page says "First month free, then $10 a month" on its own from
+these two settings. `MC_SELF_SIGNUP=0` closes `/join` entirely on a
+deployment that is for one county only.
+
+### Changing the price
+
+A Stripe price never changes; you make a new one. On the product, **Add
+another price**, set the new amount, save, copy its id, then:
+
+```bash
+fly secrets set MC_STRIPE_PRICE_ID=price_...
+```
+
+People already subscribed stay on the price they signed up at. Archive the
+old price in Stripe once nobody new should get it.
+
+### Promotion codes
+
+A free year for a demo, or any discount, is a Stripe coupon with a
+promotion code on it. The payment step has a **Have a code?** field; the app
+checks the code with Stripe, applies it, skips the free month, and if the
+code covers the whole cost Stripe asks for no card.
+
+1. **Product catalog → Coupons → Create coupon.** Percentage off 100, duration
+   **Multiple months**, 12 months. Name it "Free year".
+2. On the coupon, **Promotion codes → Create.** The code is what people type,
+   such as `FREEYEAR`. Set a redemption limit or an expiry if you like.
+
+Redemptions show on the coupon in Stripe, and the audit log records which
+code each checkout used. When a free year ends Stripe bills the card on
+file; with no card, the subscription goes past due and then unpaid, and the
+app pauses check-ins until the person adds one under **Manage billing**.
 
 To try it in test mode, open `/join` on the preview, create a profile with
 a number on `MC_SMS_ALLOW`, and pay with Stripe's test card `4242 4242 4242

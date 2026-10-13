@@ -170,6 +170,17 @@ body.bare { background: var(--surface); }
   padding: 14px 10px; font-weight: 700; }
 b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nums; }
 
+/* ---------- a promotion code, on the payment screen ---------- */
+.promo { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 14px; margin: 10px 0 4px; }
+.promo summary { cursor: pointer; font-weight: 650; color: var(--brand); padding: 12px 0; list-style: none; }
+.promo summary::-webkit-details-marker { display: none; }
+.promo summary::before { content: "+ "; }
+.promo[open] summary::before { content: "\2013 "; }
+.promo label { display: block; font-size: 14px; font-weight: 650; color: var(--ink-2); margin-top: 2px; }
+.promo input { margin-top: 6px; text-transform: uppercase; }
+.promo input::placeholder { text-transform: none; }
+.promo .fine { margin: 8px 0 12px; }
+
 /* ---------- asking someone who was there ---------- */
 .pick { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; width: 100%; }
 .pick-row b { display: block; }

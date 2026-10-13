@@ -129,7 +129,7 @@ function renderCode(phone, sent) {
 
 function renderPay({ canceled = false, created = false } = {}) {
   const b = S.me.billing, price = b.price || S.ctx.price;
-  const trial = S.ctx.trial_days;
+  const trial = b.trial || S.ctx.trial;
   app.innerHTML = `<main class="join">
     ${head()}${steps(3)}
     <h1>${created ? `Welcome, ${esc(firstName(S.me.name))}` : 'Set up payment'}</h1>
@@ -137,13 +137,19 @@ function renderPay({ canceled = false, created = false } = {}) {
       : created ? 'Your profile exists. One more step and you can start checking in.'
       : esc(b.words)}</p>
     <div class="price">
-      <b>${price ? esc(price.label) : 'Subscription'}</b>
-      ${trial ? `<span>${trial} days free, then ${price ? esc(price.label) : 'the subscription price'}.</span>` : ''}
+      <b>${trial ? esc(trial) : price ? esc(price.label) : 'Subscription'}</b>
+      ${trial ? `<span>Then ${price ? esc(price.label) : 'the subscription price'}. Nothing is charged until the free month ends.</span>` : ''}
       <span class="small">${icon('check')} Cancel any time from the app.</span>
       <span class="small">${icon('check')} Your card is entered on Stripe's secure page, never here.</span>
     </div>
     ${b.payment ? `<button class="btn block big" id="pay" type="button">${b.can_pay ? 'Continue to payment' : 'Manage billing'}</button>`
       : `<p class="callout warn">${icon('alert')} Payment is not set up on this server yet. Ask whoever runs it.</p>`}
+    ${b.payment && b.can_pay ? `<details class="promo" id="promo">
+      <summary>Have a code?</summary>
+      <label for="code">Promotion code</label>
+      <input id="code" name="code" autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="For example FREEYEAR">
+      <p class="fine">A code from MeetingsCount is applied on the next page. With a code that covers the whole cost, no card is asked for.</p>
+    </details>` : ''}
     <p class="err" id="err" role="alert" hidden></p>
     <button class="btn block ghost" type="button" data-signout>Not now, sign out</button>
   </main>`;
@@ -155,8 +161,9 @@ function renderPay({ canceled = false, created = false } = {}) {
 /* Hand the person to a Stripe page. The link is minted for this profile only. */
 async function go(btn, path) {
   btn.disabled = true; btn.textContent = 'Opening';
+  const code = ($('#code')?.value || '').trim();
   try {
-    const r = await api(path, { method: 'POST' });
+    const r = await api(path, { method: 'POST', body: JSON.stringify(code ? { code } : {}) });
     location.href = r.url;
   } catch (err) {
     btn.disabled = false; btn.textContent = path.endsWith('checkout') ? 'Continue to payment' : 'Manage billing';

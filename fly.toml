@@ -24,6 +24,7 @@ primary_region = "ord"            # Chicago, the closest region to Michigan
   MC_DATABASE_URL = "sqlite:////data/meetingscount.db"
   MC_PIN_RETENTION_DAYS = "30"
   MC_PUBLIC_URL = "https://actionscountplus.com"   # links in texts, webhook checks, www redirect
+  MC_STRIPE_TRIAL_DAYS = "30"      # the first month free; the card is taken up front
 
 [http_service]
   internal_port = 8000

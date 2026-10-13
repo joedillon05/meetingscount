@@ -177,6 +177,10 @@ class SignupVerifyIn(BaseModel):
     code: str = Field(max_length=10)
 
 
+class CheckoutIn(BaseModel):
+    code: Optional[str] = Field(default=None, max_length=40)      # a Stripe promotion code
+
+
 class CheckoutSyncIn(BaseModel):
     session_id: str = Field(max_length=120)
 

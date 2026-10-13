@@ -27,5 +27,14 @@ b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nu
 .price b { font-size: 24px; letter-spacing: -.01em; }
 .price .ic { color: var(--ok-strong); }
 .join .hero-ic { margin: 4px 0 2px; }
+.promo { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 14px; }
+.promo summary { cursor: pointer; font-weight: 650; color: var(--brand); padding: 12px 0; list-style: none; }
+.promo summary::-webkit-details-marker { display: none; }
+.promo summary::before { content: "+ "; }
+.promo[open] summary::before { content: "\2013 "; }
+.promo label { display: block; margin-top: 2px; }
+.promo input { margin-top: 6px; text-transform: uppercase; }
+.promo input::placeholder { text-transform: none; }
+.promo .fine { margin: 8px 0 12px; }
 .join .plain { margin-top: 4px; }
 .join .center { justify-items: center; text-align: center; }

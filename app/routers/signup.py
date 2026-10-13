@@ -42,6 +42,7 @@ def context():
             "texting": settings.sms_configured, "payment": billing.configured(),
             "price": billing.price_info() if billing.configured() else None,
             "trial_days": settings.STRIPE_TRIAL_DAYS if billing.configured() else 0,
+            "trial": billing.trial_words(settings.STRIPE_TRIAL_DAYS) if billing.configured() else None,
             "code_minutes": settings.LOGIN_CODE_MINUTES}
 
 

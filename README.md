@@ -30,7 +30,7 @@ participants. Each page remembers its own person, so being Aisha on the phone
 page never changes who you are on the dashboard.
 
 ```bash
-python -m pytest                    # 140 tests
+python -m pytest                    # 144 tests
 ```
 
 ### With Postgres, the way production runs

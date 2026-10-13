@@ -138,6 +138,15 @@ def price_info() -> dict | None:
     return info
 
 
+def trial_words(days: int) -> str | None:
+    """"First month free", or "First 14 days free", or None without a trial."""
+    if days <= 0:
+        return None
+    if 28 <= days <= 31:
+        return "First month free"
+    return f"First {days} days free"
+
+
 def price_words(p: dict) -> dict:
     amount = p.get("unit_amount")
     currency = (p.get("currency") or "usd").lower()
@@ -206,6 +215,7 @@ def status_out(db: Session, user: User) -> dict | None:
         "can_manage": settings.stripe_configured and bool(row.stripe_customer_id)
         and row.status not in ("unpaid_yet", "demo"),
         "price": price_info(),
+        "trial": trial_words(settings.STRIPE_TRIAL_DAYS) if settings.stripe_configured else None,
     }
 
 
@@ -254,8 +264,36 @@ def customer_id(db: Session, row: Subscription, user: User) -> str:
     return c["id"]
 
 
-def checkout_url(db: Session, user: User, base_url: str) -> str:
-    """Stripe's hosted page for the subscription. The card is typed there, never here."""
+def promotion(code: str) -> dict | None:
+    """
+    The Stripe promotion code behind what someone typed, or None. Codes are
+    made in the Stripe dashboard (a coupon, then a promotion code on it), so
+    a free year for a demo is a 100% coupon that lasts 12 months. Stripe
+    matches the code case-insensitively and leaves out inactive ones.
+    """
+    code = " ".join(code.split())
+    if not code or len(code) > 40:
+        return None
+    found = get_client().get("/v1/promotion_codes", {"code": code, "active": "true", "limit": "1"})
+    for p in found.get("data") or []:
+        coupon = p.get("coupon") or {}
+        if coupon.get("valid") is False:
+            continue
+        if p.get("expires_at") and int(p["expires_at"]) < time.time():
+            continue
+        if p.get("max_redemptions") and int(p.get("times_redeemed") or 0) >= int(p["max_redemptions"]):
+            continue
+        return p
+    return None
+
+
+def checkout_url(db: Session, user: User, base_url: str, code: str | None = None) -> str:
+    """
+    Stripe's hosted page for the subscription. The card is typed there,
+    never here. Without a code: the trial, if one is set, and the card up
+    front. With a code: the discount instead of the trial, and no card if
+    nothing is due, which is what a free year for a demo needs.
+    """
     row = ensure_row(db, user)
     data = {
         "mode": "subscription",
@@ -267,7 +305,13 @@ def checkout_url(db: Session, user: User, base_url: str) -> str:
         "success_url": f"{base_url}/join?paid=1&session_id={{CHECKOUT_SESSION_ID}}",
         "cancel_url": f"{base_url}/join?canceled=1",
     }
-    if settings.STRIPE_TRIAL_DAYS > 0:
+    if code:
+        promo = promotion(code)
+        if promo is None:
+            raise HTTPException(422, "That code is not valid, or it has run out. Check it and try again.")
+        data["discounts[0][promotion_code]"] = promo["id"]
+        data["payment_method_collection"] = "if_required"
+    elif settings.STRIPE_TRIAL_DAYS > 0:
         data["subscription_data[trial_period_days]"] = str(settings.STRIPE_TRIAL_DAYS)
     s = get_client().post("/v1/checkout/sessions", data)
     return s["url"]

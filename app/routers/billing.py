@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .. import billing
-from ..auth import audit, current_user
+from ..auth import audit, client_ip, current_user
 from ..config import settings
 from ..db import get_db
 from ..models import Role, User
-from ..schemas import CheckoutSyncIn
+from ..schemas import CheckoutIn, CheckoutSyncIn
+from ..security import too_many
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
@@ -41,18 +42,24 @@ def my_billing(db: Session = Depends(get_db), user: User = Depends(current_user)
 
 
 @router.post("/checkout")
-def checkout(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """A link to Stripe's checkout page for this person's subscription."""
+def checkout(request: Request, body: CheckoutIn | None = None,
+             db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """A link to Stripe's checkout page for this person's subscription, with a promotion code if they have one."""
     row = _self_serve(db, user)
     if not billing.configured():
         raise HTTPException(409, "Payment is not set up on this server yet.")
     if row.active and row.status != "demo":
         raise HTTPException(409, "Your subscription is already active.")
+    code = (body.code or "").strip() if body else ""
+    if code and (too_many(f"promo:{client_ip(request) or 'unknown'}", 10, 900)
+                 or too_many(f"promo:user:{user.id}", 10, 900)):
+        raise HTTPException(429, "Too many code attempts. Wait fifteen minutes and try again.")
     try:
-        url = billing.checkout_url(db, user, _base(request))
+        url = billing.checkout_url(db, user, _base(request), code=code or None)
     except billing.StripeError as exc:
         raise HTTPException(502, f"Stripe did not open checkout: {exc}") from exc
-    audit(db, user, "open_checkout", target_type="user", target_id=user.id, request=request)
+    audit(db, user, "open_checkout", target_type="user", target_id=user.id,
+          detail=f"with code {code.upper()}" if code else None, request=request)
     return {"url": url}
 
 
