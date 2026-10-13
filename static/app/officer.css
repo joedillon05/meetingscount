@@ -333,3 +333,34 @@ td.right { text-align: right; }
 .kv.setup { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 10px 0 4px; }
 .kv.setup dt { color: var(--muted); }
 .kv.setup dd { margin: 0; }
+
+/* ---------- phones ----------
+   The dashboard is desktop first, but an officer will open it from a text
+   on their phone. Under 700px the header becomes two rows with the sections
+   scrolling sideways, tables scroll inside their card instead of squeezing
+   every word onto its own line, and side-by-side panels stack. Nothing
+   here applies above 700px, so a desktop or a courtroom tablet is unchanged. */
+@media (max-width: 700px) {
+  html { overflow-x: hidden; }
+  .top { flex-wrap: wrap; height: auto; padding: 8px 12px 0; gap: 0 10px; }
+  .top .brand { font-size: 15px; }
+  .top .chip { max-width: 48vw; overflow: hidden; text-overflow: ellipsis; }
+  .nav { order: 10; flex-basis: 100%; height: 44px; gap: 0; overflow-x: auto; scrollbar-width: none;
+    margin: 2px -12px 0; padding: 0 6px; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { padding: 0 10px; font-size: 13px; gap: 5px; }
+  .nav a span:not(.count) { display: inline; }
+  main#view { padding: 14px 12px 40px; gap: 12px; }
+  .page-head h1 { font-size: 23px; }
+  .toolbar { padding: 10px 12px; gap: 8px; }
+  .toolbar input[type=search], .toolbar select, .dir .toolbar input[type="search"] {
+    width: 100%; min-width: 0; flex: 1 1 100%; }
+  .qtools input[type=search] { margin-left: 0; }
+  table.grid { min-width: 600px; }
+  .grid th, .grid td { padding: 9px 10px; }
+  .table-wrap.tall { max-height: none; }
+  .qlist { position: static; max-height: 50vh; }
+  .two { grid-template-columns: 1fr; }
+  .tl li { grid-template-columns: 1fr; gap: 2px; }
+  .fact { grid-template-columns: 1fr; gap: 2px; }
+}

@@ -66,7 +66,10 @@ def list_meetings(since: datetime | None = None, until: datetime | None = None,
     if user.role == Role.participant:
         q = q.where((Meeting.source != MeetingSource.personal) | (Meeting.created_by_id == user.id))
     else:
-        q = q.where(Meeting.source != MeetingSource.personal)
+        # Staff see the county's own list. Directory meetings have a section
+        # of their own on the dashboard, so they are left out here even for
+        # a superuser, who is not scoped to one county.
+        q = q.where(Meeting.source.not_in((MeetingSource.personal, MeetingSource.directory)))
     rows = list(db.scalars(q).all())
 
     if user.role == Role.participant:
