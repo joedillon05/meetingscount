@@ -55,7 +55,14 @@ def list_meetings(since: datetime | None = None, until: datetime | None = None,
     within that window are created as rows here, so each one has an id a
     check-in can point at.
     """
-    q = scope_to_county(select(Meeting), Meeting, user)
+    # The caller's county, plus meetings that belong to no county: those a
+    # superuser made, which everyone may check in to. Directory meetings
+    # also have no county, but a participant gets the ones near their town
+    # below rather than the whole state's list.
+    q = select(Meeting)
+    if user.role != Role.superuser:
+        q = q.where((Meeting.county_id == user.county_id)
+                    | (Meeting.county_id.is_(None) & (Meeting.source != MeetingSource.directory)))
     if since is not None:
         q = q.where(Meeting.starts_at >= _aware(since))
     if until is not None:

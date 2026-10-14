@@ -575,3 +575,39 @@ def test_the_demo_account_list_never_names_a_self_serve_person(client, stripe, m
     listed = client.get("/api/auth/demo-accounts").json()
     assert all(p["name"] != "Real Person" for p in listed["participants"])
     assert me["name"] == "Real Person"
+
+
+# --------------------------------------------------------------------------- #
+# Meetings a superuser makes
+# --------------------------------------------------------------------------- #
+
+def test_a_meeting_a_superuser_makes_is_on_every_phone(client, demo_no_stripe):
+    from datetime import timedelta
+    db = SessionLocal()
+    su = User(role=Role.superuser, name="Support", email="support@example.com")
+    db.add(su)
+    db.commit()
+    su_id = su.id
+    db.close()
+
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    r = client.post("/api/meetings", json={"name": "Thursday night group", "category": "public",
+                                           "lat": 42.2750, "lng": -83.7413, "starts_at": soon.isoformat()},
+                    headers=as_(su_id))
+    assert r.status_code == 201, r.text
+    assert r.json()["county_id"] is None
+    meeting_id = r.json()["id"]
+
+    phone = fresh_phone()
+    code = client.post("/api/signup/start", json={"name": "Lee Tran", "phone": phone}).json()["demo_code"]
+    assert client.post("/api/signup/verify", json={"phone": phone, "code": code}).status_code == 200
+    since = (datetime.now(timezone.utc) - timedelta(hours=18)).isoformat()
+    until = (datetime.now(timezone.utc) + timedelta(days=8)).isoformat()
+    r = client.get("/api/meetings", params={"since": since, "until": until})
+    assert r.status_code == 200, r.text
+    listed = r.json()
+    assert meeting_id in [m["id"] for m in listed]
+    # Nothing from the shared directory leaks in just because it has no county either.
+    assert all(m["source"] != "directory" for m in listed)
+    _consent(client)
+    assert _check_in(client, meeting_id).status_code == 201
