@@ -12,7 +12,6 @@ Who may ask whom:
   - never a number that has said stop
   - at most three asks per check-in, ten a day, and not twice to the same
     person while an ask is still open
-  - never on a personal meeting: those are the participant's alone
 """
 from __future__ import annotations
 
@@ -123,9 +122,6 @@ def ask(checkin_id: int, body: AskIn, request: Request, background: BackgroundTa
     c = db.get(CheckIn, checkin_id)
     if not c or c.user_id != user.id:
         raise HTTPException(404, "check-in not found")
-    m = db.get(Meeting, c.meeting_id)
-    if m.source == MeetingSource.personal:
-        raise HTTPException(409, "Personal meetings are yours alone. Nobody needs to confirm them.")
     if c.checked_in_at < datetime.now(timezone.utc) - timedelta(days=settings.CONFIRM_LINK_DAYS):
         raise HTTPException(409, "That check-in is too long ago to ask about now.")
 

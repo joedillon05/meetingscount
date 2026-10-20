@@ -32,7 +32,7 @@ def _spec(m: Meeting) -> MeetingSpec:
 def meeting_visible_to(m: Meeting | None, user: User) -> bool:
     """
     Whether `user` may see or check in to `m`. Everyone is kept to their own
-    county, and a personal meeting belongs to the person who created it.
+    county, and a meeting a participant added belongs to the person who added it.
     """
     if m is None:
         return False

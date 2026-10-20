@@ -12,8 +12,8 @@ for a period counts the check-ins in that period that COUNT:
 
 The latest review is the one that counts; see app/reviewing.py.
 
-Personal meetings a participant created themselves never count toward a court
-requirement, only toward their own tracking.
+A meeting a participant added themselves counts like any other. It is marked
+as theirs on the record and the report, and an officer can decide against it.
 
 Weeks run Monday to Sunday in the county's timezone, because that is how a
 probation officer thinks about a week, not UTC.
@@ -102,7 +102,7 @@ def evaluate(db: Session, req: Requirement, when: datetime, tz: str,
         q = q.where(Meeting.category == req.category)
 
     pairs = db.execute(q).all()
-    eligible = [(c, m) for c, m in pairs if m.source != MeetingSource.personal]
+    eligible = pairs
     decisions = latest_decisions(db, [c.id for c, _ in eligible]) | (overrides or {})
 
     # One meeting counts once, however many times someone tapped. A retry

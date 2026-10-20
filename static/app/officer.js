@@ -278,7 +278,7 @@ async function viewParticipant(id) {
 
     <section class="card">
       <div class="row between"><h2 class="h2 flush">Check-in history</h2>
-        <span class="muted small">${plural(d.timeline.length, 'check-in')}, newest first. Personal meetings are private to the participant and never shown here.</span></div>
+        <span class="muted small">${plural(d.timeline.length, 'check-in')}, newest first. A meeting the participant added themselves is marked.</span></div>
       <ol class="ptl">${d.timeline.slice(0, tlLimit).map(ev => ptlItem(ev, d)).join('') || '<li class="muted small">No check-ins yet.</li>'}</ol>
       ${d.timeline.length > tlLimit ? `<button class="btn ghost" data-more type="button">Show all ${d.timeline.length}</button>` : ''}
     </section>`;
@@ -313,6 +313,7 @@ function ptlItem(ev, d) {
   return `<li class="ev ${ev.status}">
     <div class="ev-top">
       <b>${esc(ev.meeting.name)}</b>
+      ${ev.meeting.added ? '<span class="tag">Added by participant</span>' : ''}
       <span class="badge tone-${tone} sm">${icon(ic)} ${label}</span>
       ${dec ? `<span class="badge tone-${dec[1]} sm">${dec[0]}</span>` : ''}
       <span class="spacer"></span><span class="muted small">${esc(dateTime(ev.checked_in_at))}</span>
@@ -576,7 +577,7 @@ async function viewMeetings() {
   try { meetings = await api('/api/meetings'); } catch (e) { return failed(v, e); }
   const STATE = { open: ['Open now', 'ok'], upcoming: ['Upcoming', 'neutral'], in_progress: ['In progress', 'warn'], ended: ['Ended', 'neutral'] };
   v.innerHTML = `
-    <div class="page-head"><div><h1>Meetings</h1><p class="muted">Meetings that count toward a requirement. Participants' personal meetings are private and not listed.</p></div></div>
+    <div class="page-head"><div><h1>Meetings</h1><p class="muted">Meetings that count toward a requirement. One a participant adds themselves shows on their record, marked, not here.</p></div></div>
     <div class="msplit">
       <div class="mstack">
       <section class="card flush">

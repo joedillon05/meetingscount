@@ -45,14 +45,12 @@ def caseload(mine_only: bool = False, db: Session = Depends(get_db),
         q = q.where(Participant.officer_id == user.id)
     participants = db.scalars(q).all()
 
-    # Items waiting on a decision per participant. Personal meetings are the
-    # participant's own business and stay out of every staff view.
+    # Items waiting on a decision per participant.
     pending = reviewing.open_counts(db, user)
 
     last_rows = db.execute(
         select(CheckIn.user_id, func.max(CheckIn.checked_in_at))
         .join(Meeting, Meeting.id == CheckIn.meeting_id)
-        .where(Meeting.source != MeetingSource.personal)
         .group_by(CheckIn.user_id)
     ).all()
     last_seen = dict(last_rows)
@@ -88,7 +86,7 @@ def participant_detail(participant_id: int, request: Request, db: Session = Depe
 
     rows = db.execute(
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
-        .where(CheckIn.user_id == p.user_id, Meeting.source != MeetingSource.personal)
+        .where(CheckIn.user_id == p.user_id)
         .order_by(CheckIn.checked_in_at.desc())
     ).all()
     states = reviewing.states_for(db, [c for c, _ in rows])

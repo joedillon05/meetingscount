@@ -227,7 +227,7 @@ function listItem(i, canPick) {
     <div class="qi-body">
       <div class="qi-top"><b>${esc(i.participant.name)}</b>
         <span class="qi-age ${old ? 'old' : ''}" title="${esc(dateTime(i.since))}">${esc(ago(i.since).replace(' ago', ''))}</span></div>
-      <p class="qi-sub">${esc(i.meeting.name)} · ${esc(shortDay(i.checked_in_at))}, ${time(i.checked_in_at)}</p>
+      <p class="qi-sub">${esc(i.meeting.name)}${i.meeting.added ? ' · <span class="tag">Added by participant</span>' : ''} · ${esc(shortDay(i.checked_in_at))}, ${time(i.checked_in_at)}</p>
       <div class="qi-tags">
         ${Q.tab === 'decided' ? '' : signals(i).map(s => `<span class="sig ${s.tone}">${esc(s.text)}</span>`).join('')}
         ${i.replied ? `<span class="sig info">${icon('note')} Replied</span>` : i.notes_count ? `<span class="sig info">${icon('note')} Note</span>` : ''}
@@ -316,7 +316,7 @@ function renderDetail() {
       <div>
         <h2><a href="#participant/${p.participant_id}">${esc(p.name)}</a></h2>
         <p class="muted small">${[p.case_number && `Case ${esc(p.case_number)}`, p.officer && esc(p.officer),
-          `${esc(d.meeting.name)}`, `${esc(dateTime(d.checked_in_at))}`].filter(Boolean).join(' · ')}</p>
+          `${esc(d.meeting.name)}${d.meeting.added ? ' (added by participant)' : ''}`, `${esc(dateTime(d.checked_in_at))}`].filter(Boolean).join(' · ')}</p>
       </div>
       <span class="badge tone-${{ confirmed: 'ok', flagged: 'warn', rejected: 'bad' }[d.status]}">
         ${icon({ confirmed: 'check', flagged: 'alert', rejected: 'x' }[d.status])}

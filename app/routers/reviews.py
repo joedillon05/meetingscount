@@ -151,9 +151,6 @@ def decide(checkin_id: int, body: ReviewIn, request: Request,
     # officer may still review it from the participant's record.
     if c is None or (user.role != Role.superuser and c.county_id != user.county_id):
         raise HTTPException(404, "check-in not found")
-    if db.get(Meeting, c.meeting_id).source == MeetingSource.personal:
-        raise HTTPException(404, "check-in not found")      # never staff business
-
     st = states_for(db, [c])[c.id]
     note = (body.note or "").strip() or None
     why = note_required(body.decision, st, c.status)
@@ -290,8 +287,7 @@ def _person(db: Session, p: Participant, user_id: int, tz: str, now: datetime) -
     """The participant's recent record, for "is this out of character?"."""
     since = now - timedelta(days=90)
     rows = db.execute(select(CheckIn).join(Meeting, Meeting.id == CheckIn.meeting_id)
-                      .where(CheckIn.user_id == user_id, CheckIn.checked_in_at >= since,
-                             Meeting.source != MeetingSource.personal)).scalars().all()
+                      .where(CheckIn.user_id == user_id, CheckIn.checked_in_at >= since)).scalars().all()
     decisions = latest_decisions(db, [c.id for c in rows])
     weeks = []
     for r in p.requirements:

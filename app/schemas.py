@@ -222,5 +222,6 @@ def checkin_out(c: Any, meeting: Any = None, *, include_pin: bool = False) -> di
                         "ends_at": meeting.ends_at.isoformat(),
                         "duration_min": meeting.duration_min,
                         "time_window_min": meeting.time_window_min,
-                        "counts": meeting.counts_toward_requirement}
+                        "counts": meeting.counts_toward_requirement,
+                        "added": meeting.added_by_participant}
     return d

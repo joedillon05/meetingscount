@@ -106,7 +106,7 @@ def note_required(decision: ReviewDecision, st: ReviewState, status: CheckInStat
 def reviewable(db: Session, user, *, mine_only: bool = False, ids: list[int] | None = None):
     """
     Check-ins a staff member may review: flagged, rejected, or already
-    reviewed, in their county, never on a personal meeting. Rows are
+    reviewed, in their county. Rows are
     (CheckIn, Meeting, User, Participant | None).
     """
     from sqlalchemy import or_
@@ -118,7 +118,6 @@ def reviewable(db: Session, user, *, mine_only: bool = False, ids: list[int] | N
          .join(Meeting, Meeting.id == CheckIn.meeting_id)
          .join(User, User.id == CheckIn.user_id)
          .outerjoin(Participant, Participant.user_id == CheckIn.user_id)
-         .where(Meeting.source != MeetingSource.personal)
          .where(or_(CheckIn.status.in_(NEEDS_REVIEW),
                     CheckIn.id.in_(select(Review.checkin_id)))))
     q = scope_to_county(q, CheckIn, user)

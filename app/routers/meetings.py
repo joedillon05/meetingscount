@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import directory
@@ -15,6 +15,7 @@ from ..schemas import MeetingIn
 from .checkins import meeting_visible_to
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+ADDED_PER_DAY = 3                # meetings a participant may add in 24 hours
 
 
 def with_window(m: Meeting, now: datetime | None = None) -> dict:
@@ -37,7 +38,8 @@ def with_window(m: Meeting, now: datetime | None = None) -> dict:
         "radius_ft": m.radius_ft, "time_window_min": m.time_window_min,
         "opens_at": opens.isoformat(), "closes_at": closes.isoformat(),
         "ends_at": m.ends_at.isoformat(), "window_state": state,
-        "counts": m.counts_toward_requirement, "county_id": m.county_id,
+        "counts": m.counts_toward_requirement, "added": m.added_by_participant,
+        "county_id": m.county_id,
         "series_id": m.series_id,
     }
 
@@ -67,9 +69,9 @@ def list_meetings(since: datetime | None = None, until: datetime | None = None,
         q = q.where(Meeting.starts_at >= _aware(since))
     if until is not None:
         q = q.where(Meeting.starts_at < _aware(until))
-    # A participant sees countable meetings plus their own personal ones.
-    # Staff never see personal meetings: those are the participant's own
-    # tracking (therapy, often) and the court has no business in them.
+    # A participant sees the listed meetings plus the ones they added. A
+    # meeting someone added is theirs alone to check in to, so it stays off
+    # the county's meeting list; staff see it on that person's record.
     if user.role == Role.participant:
         q = q.where((Meeting.source != MeetingSource.personal) | (Meeting.created_by_id == user.id))
     else:
@@ -98,11 +100,25 @@ def _aware(dt: datetime) -> datetime:
 def create_meeting(body: MeetingIn, request: Request,
                    db: Session = Depends(get_db), user: User = Depends(current_user)):
     source = body.source
-    # A participant can only ever create a personal meeting, whatever they send.
+    fields = body.model_dump(exclude={"source"})
     if user.role == Role.participant:
+        # A participant adds a meeting that is not on the list, where they are,
+        # starting now. It counts, so nothing about it is theirs to bend: the
+        # server sets the time, the distance and the window, and it is marked
+        # as added everywhere it shows.
         source = MeetingSource.personal
-    m = Meeting(county_id=user.county_id, created_by_id=user.id,
-                **body.model_dump(exclude={"source"}), source=source)
+        fields["address"] = (body.address or "").strip()[:300]
+        if not fields["address"]:
+            raise HTTPException(422, "Say where the meeting is, so whoever reads your log knows.")
+        added_today = db.scalar(select(func.count(Meeting.id)).where(
+            Meeting.created_by_id == user.id, Meeting.source == MeetingSource.personal,
+            Meeting.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))) or 0
+        if added_today >= ADDED_PER_DAY:
+            raise HTTPException(429, f"You can add {ADDED_PER_DAY} meetings a day. "
+                                     "If you went to more, ask your officer to record them.")
+        fields |= {"starts_at": datetime.now(timezone.utc), "radius_ft": 500, "time_window_min": 60,
+                   "duration_min": min(fields["duration_min"], 240)}
+    m = Meeting(county_id=user.county_id, created_by_id=user.id, **fields, source=source)
     if m.starts_at.tzinfo is None:
         m.starts_at = m.starts_at.replace(tzinfo=timezone.utc)
     db.add(m)

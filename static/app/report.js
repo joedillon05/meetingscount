@@ -95,8 +95,8 @@ function render(d) {
           <li><b>Confirmed</b> means the phone was inside the meeting's allowed distance, within the check-in window, with a good location reading.</li>
           <li><b>Needed review</b> means something was unclear, usually a weak location reading indoors. A person decided it, and their decision is shown.</li>
           <li><b>Could not be verified</b> means a check-in was recorded outside the allowed distance or time. It is not evidence that the participant was absent.</li>
-          <li><b>Confirmed by text</b> means someone the participant chose, such as a sponsor or the meeting chair, answered a text from MeetingsCount saying they saw the participant there. It is one more piece of evidence, not a decision.</li>
-          <li>Meetings a participant recorded for themselves are private to them and are not included here.</li>
+          <li><b>Confirmed by text</b> means someone the participant chose, such as a sponsor or the meeting chair, answered a text from ActionsCount+ saying they saw the participant there. It is one more piece of evidence, not a decision.</li>
+          <li><b>Added by participant</b> means the meeting was not on any meeting list. The participant added it where they were, and the location their phone recorded is shown, so it can be checked.</li>
         </ul>
       </section>
 
@@ -135,13 +135,14 @@ function checkInTable(d) {
       return `<tr>
         <td class="nowrap">${esc(shortDay(c.date))}, ${esc(time(c.date))}</td>
         <td>${esc(c.meeting)}${c.address ? `<span class="muted"> · ${esc(c.address)}</span>` : ''}
+          ${c.added_by_participant ? `<div class="rep-review">Added by participant. Phone's location at check-in: ${esc(c.recorded_at)}</div>` : ''}
           ${c.review ? `<div class="rep-review">${esc(c.review_words)} by ${esc(c.reviewed_by || 'an officer')},
             ${esc(shortDay(c.reviewed_at))}${c.review_note ? `: "${esc(c.review_note)}"` : ''}</div>` : ''}
           ${c.confirmation_words ? `<div class="rep-review">${esc(c.confirmation_words)}${
             c.confirmation?.answer_note ? `: "${esc(c.confirmation.answer_note)}"` : ''}</div>` : ''}</td>
-        <td>${esc(RESULT[c.result] || c.result)}</td>
-        <td class="nowrap">${esc(feet(c.distance_ft))}</td>
-        <td class="s-${tone}">${esc(word)}</td>
+        <td data-label="Result">${esc(RESULT[c.result] || c.result)}</td>
+        <td data-label="Distance" class="nowrap">${esc(feet(c.distance_ft))}</td>
+        <td data-label="" class="s-${tone}">${esc(word)}</td>
       </tr>`;
     }).join('')}</tbody>
   </table>`;

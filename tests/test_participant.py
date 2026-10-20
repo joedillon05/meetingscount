@@ -102,34 +102,37 @@ def test_retry_after_rejection_counts_the_meeting_once(client, ids):
 # Tenancy and personal meetings
 # --------------------------------------------------------------------------- #
 
-def test_participant_cannot_check_in_to_someone_elses_personal_meeting(client, ids):
+def test_participant_cannot_check_in_to_someone_elses_added_meeting(client, ids):
     mine = client.post("/api/meetings", json={
         "name": "Therapy", "category": "therapy", "lat": 42.0, "lng": -83.0,
-        "starts_at": NOW.isoformat()}, headers=as_(ids["participant"])).json()
+        "address": "Dr. Patel's office", "starts_at": NOW.isoformat()},
+        headers=as_(_named(client, "Chris Lindqvist"))).json()
     other = _named(client, "Marcus Webb")
     assert _check_in(client, other, mine["id"], lat=42.0, lng=-83.0).status_code == 404
     assert client.get(f"/api/meetings/{mine['id']}", headers=as_(other)).status_code == 404
 
 
-def test_staff_never_see_personal_meetings_or_their_check_ins(client, ids):
+def test_staff_see_added_meetings_marked_and_can_decide_against_them(client, ids):
+    """An added meeting counts, so the officer has to be able to see it and say no."""
     who = _named(client, "Dana Ruiz")
     mine = client.post("/api/meetings", json={
         "name": "Dr. Patel", "category": "therapy", "lat": 42.0, "lng": -83.0,
-        "starts_at": NOW.isoformat()}, headers=as_(who)).json()
-    # Far away, so it would land in the review queue if staff could see it.
+        "address": "Dr. Patel's office", "starts_at": NOW.isoformat()}, headers=as_(who)).json()
+    # Far from where it was added, so it lands in the review queue.
     c = _check_in(client, who, mine["id"], lat=42.5, lng=-83.0).json()
     assert c["status"] == "rejected"
 
     officer = ids["officer"]
     listed = client.get("/api/meetings", headers=as_(officer)).json()
-    assert not any(m["id"] == mine["id"] for m in listed)
+    assert not any(m["id"] == mine["id"] for m in listed), "not on the county's meeting list"
     queue = client.get("/api/reviews/queue", headers=as_(officer)).json()["items"]
-    assert not any(q["id"] == c["id"] for q in queue)
+    assert any(q["id"] == c["id"] and q["meeting"]["added"] for q in queue)
     pid = client.get("/api/me", headers=as_(who)).json()["participant_id"]
     detail = client.get(f"/api/participants/{pid}", headers=as_(officer)).json()
-    assert not any(ev["id"] == c["id"] for ev in detail["timeline"])
-    assert client.post(f"/api/reviews/{c['id']}", json={"decision": "denied"},
-                       headers=as_(officer)).status_code == 404
+    assert any(ev["id"] == c["id"] for ev in detail["timeline"])
+    r = client.post(f"/api/reviews/{c['id']}", json={
+        "decision": "denied", "note": "Nowhere near where it was added."}, headers=as_(officer))
+    assert r.status_code in (200, 201), r.text
 
     # The participant still sees their own.
     mine_list = client.get("/api/checkins/mine", headers=as_(who)).json()

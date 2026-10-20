@@ -74,7 +74,7 @@ class MeetingCategory(str, enum.Enum):
 class MeetingSource(str, enum.Enum):
     directory = "directory"      # imported from a meeting feed; countable
     staff = "staff"              # created by an officer/admin; countable
-    personal = "personal"        # created by a participant; self-tracking only
+    personal = "personal"        # added by a participant where they were; countable, marked as theirs
 
 
 class CheckInStatus(str, enum.Enum):
@@ -291,9 +291,15 @@ class Meeting(Base):
 
     @property
     def counts_toward_requirement(self) -> bool:
-        """Personal meetings are self-tracking only. A participant cannot
-        invent a meeting at home and have it satisfy a court order."""
-        return self.source in (MeetingSource.directory, MeetingSource.staff)
+        """Every meeting counts, including one a participant added because it
+        was not on the list. Those are marked as added wherever they show, on
+        the record, in the review queue and on the report, so whoever reads it
+        can weigh it, and an officer can decide against it."""
+        return True
+
+    @property
+    def added_by_participant(self) -> bool:
+        return self.source == MeetingSource.personal
 
     @property
     def ends_at(self) -> datetime:

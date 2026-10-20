@@ -38,8 +38,7 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = db.execute(
         select(CheckIn, Meeting).join(Meeting, Meeting.id == CheckIn.meeting_id)
-        .where(CheckIn.user_id == p.user_id, CheckIn.checked_in_at >= since,
-               Meeting.source != MeetingSource.personal)
+        .where(CheckIn.user_id == p.user_id, CheckIn.checked_in_at >= since)
         .order_by(CheckIn.checked_in_at.asc())
     ).all()
     states = states_for(db, [c for c, _ in rows])
@@ -54,6 +53,9 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
             "date": c.checked_in_at.astimezone(timezone.utc).isoformat(),
             "meeting": m.name, "address": m.address, "category": m.category.value,
             "counts_toward_requirement": m.counts_toward_requirement,
+            # Not from the list: the participant added it where they were.
+            "added_by_participant": m.added_by_participant,
+            "recorded_at": f"{m.lat:.4f}, {m.lng:.4f}" if m.added_by_participant else None,
             "result": c.status.value, "confidence": c.confidence,
             "distance_ft": round(c.distance_ft, 1),
             "checked_out": c.checked_out_at is not None,

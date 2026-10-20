@@ -238,12 +238,12 @@ def test_rules_on_asking(client, ids, phones):
     other = _named(client, "Marcus Webb")
     assert _ask(client, other, c["id"]).status_code == 404
 
-    # Not a personal meeting: those are the participant's alone.
-    personal = client.post("/api/meetings", json={"name": "Therapy", "category": "therapy",
-                           "lat": 42.2750, "lng": -83.7413, "starts_at": NOW.isoformat()},
-                           headers=as_(jenna)).json()
-    pc = _checked_in(client, jenna, personal["id"], out=False)
-    assert _ask(client, jenna, pc["id"]).status_code == 409
+    # A meeting the participant added counts, so a sponsor can vouch for it too.
+    added = client.post("/api/meetings", json={"name": "Therapy", "category": "therapy",
+                        "address": "Dr. Patel's office", "lat": 42.2750, "lng": -83.7413,
+                        "starts_at": NOW.isoformat()}, headers=as_(jenna)).json()
+    pc = _checked_in(client, jenna, added["id"], out=False)
+    assert _ask(client, jenna, pc["id"], name="Dr Patel", phone="7345550184").status_code == 201
 
     # Three people at most per check-in.
     assert _ask(client, jenna, c["id"], name="Second Person", phone="7345550181").status_code == 201

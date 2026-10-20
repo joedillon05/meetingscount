@@ -26,7 +26,7 @@ STAFF = (Role.officer, Role.admin)
 def stats(db: Session = Depends(get_db), user: User = Depends(require(*STAFF))):
     staff_visible = Meeting.source != MeetingSource.personal
     checkins = db.scalars(scope_to_county(
-        select(CheckIn).join(Meeting, Meeting.id == CheckIn.meeting_id).where(staff_visible),
+        select(CheckIn).join(Meeting, Meeting.id == CheckIn.meeting_id),
         CheckIn, user)).all()
     meetings = db.scalars(scope_to_county(select(Meeting).where(staff_visible),
                                           Meeting, user)).all()
@@ -100,7 +100,6 @@ def ops_checkins(db: Session = Depends(get_db), user: User = Depends(require(Rol
         select(CheckIn, Meeting, User)
         .join(Meeting, Meeting.id == CheckIn.meeting_id)
         .join(User, User.id == CheckIn.user_id)
-        .where(Meeting.source != MeetingSource.personal)
         .order_by(CheckIn.checked_in_at.desc()).limit(500), CheckIn, user)
     ).all()
     audit(db, user, "view_ops_map", detail=f"{len(rows)} check-ins with coordinates")

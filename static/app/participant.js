@@ -38,11 +38,6 @@ const REQ_NOUN = {
 /* Where a check-in stands for the participant, folding in any review. */
 function standing(c) {
   const r = c.review?.decision;
-  if (!c.meeting.counts) {
-    return c.status === 'rejected'
-      ? { key: 'rejected', label: 'Not confirmed', tone: 'bad', icon: 'x' }
-      : { key: 'personal', label: 'Saved for you', tone: 'neutral', icon: 'check' };
-  }
   if (r === 'approved') return { key: 'approved', label: 'Counted after review', tone: 'ok', icon: 'check' };
   if (r === 'denied') return { key: 'denied', label: 'Not counted', tone: 'bad', icon: 'x' };
   if (r === 'more_info' && c.awaiting_reply) return { key: 'question', label: 'Your officer asked a question', tone: 'warn', icon: 'note' };
@@ -291,8 +286,8 @@ function viewToday() {
     </section>` : ''}
 
     <button class="link-row" data-act="personal" type="button">
-      ${icon('plus')}<span><b>Track a personal meeting</b><br>
-      <span class="muted small">Therapy or anything not on the list. Only you see these.</span></span>${icon('arrow', 'muted')}
+      ${icon('plus')}<span><b>Add a meeting that isn't listed</b><br>
+      <span class="muted small">You're there now and it's not on the list. It counts, marked as added by you.</span></span>${icon('arrow', 'muted')}
     </button>
   </div>`;
 }
@@ -490,7 +485,7 @@ function meetingCard(m) {
       <div class="m-time"><b>${time(m.starts_at)}</b><span class="muted">${duration(m.duration_min)}</span></div>
       <div class="m-main">
         <h4>${esc(m.name)}</h4>
-        <p class="muted small">${esc(CATEGORY[m.category] || m.category)}${m.counts ? '' : ' · <span class="tag">Only you</span>'}${
+        <p class="muted small">${esc(CATEGORY[m.category] || m.category)}${m.added ? ' · <span class="tag">Added by you</span>' : ''}${
           m.miles != null ? ` · ${m.miles < 1 ? 'under a mile' : `${Math.round(m.miles)} mi`} away` : ''}</p>
         ${m.address ? `<a class="addr small" href="${mapsUrl(m)}" target="_blank" rel="noopener">${icon('directions')} ${esc(m.address)}</a>` : ''}
       </div>
@@ -606,7 +601,8 @@ function showResult(sh, c, m, post) {
     lead = `You checked in to this meeting at ${time(c.checked_in_at)}. Nothing else to do.`;
   } else if (c.status === 'confirmed') {
     title = 'You\'re checked in';
-    lead = c.meeting.counts ? 'This counts toward your requirement.' : 'Saved to your own tracking. Only you can see it.';
+    lead = c.meeting.added ? 'This counts toward your requirement. Your log shows it as a meeting you added.'
+      : 'This counts toward your requirement.';
   } else if (c.status === 'flagged') {
     title = 'Checked in, sent for review';
     lead = 'Something in the signal was unclear, so your officer will take a look. You don\'t need to do anything else.';
@@ -924,35 +920,85 @@ async function removePerson(id) {
   catch (e) { toast(e.message); }
 }
 
-/* ---------- personal meetings ---------- */
+/* The You tab: who the participant has sent their log to. */
+async function loadShares() {
+  const ul = $('#shareList');
+  if (!ul) return;
+  let shares = [];
+  try { shares = await api('/api/my/shares'); } catch { ul.innerHTML = '<li class="muted small">Could not load who has your log.</li>'; return; }
+  ul.innerHTML = shares.map(s => `<li><span class="who"><b>${esc(s.name)}</b>
+      <span class="muted small">${esc(s.phone)} · ${s.last_opened_at ? `opened ${esc(relativeDay(s.last_opened_at).toLowerCase())}` : 'not opened yet'}</span></span>
+      <button class="linkish small" data-act="stopshare" data-id="${s.id}" type="button">Stop sharing</button></li>`).join('');
+}
+
+function shareSheet() {
+  const sh = sheet(`<form class="step left ask-form" id="shareLog">
+    <h2>Send my log</h2>
+    <p class="muted">They get one text with a link to your log. It always shows your latest check-ins, until you stop sharing.</p>
+    <label for="sl-name">Their name</label>
+    <input id="sl-name" maxlength="80" autocomplete="off" placeholder="Sam" required>
+    <label for="sl-phone">Their mobile number</label>
+    <input id="sl-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="(734) 555-0142" required>
+    <button class="btn block" type="submit">Send</button>
+  </form>`, { label: 'Send my log' });
+  sh.body.querySelector('#sl-name').focus();
+  sh.body.querySelector('#shareLog').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, b = f.querySelector('button');
+    b.disabled = true;
+    let r;
+    try {
+      r = await api('/api/my/shares', { method: 'POST', body: JSON.stringify({
+        name: f.querySelector('#sl-name').value.trim(), phone: f.querySelector('#sl-phone').value.trim() }) });
+    } catch (err) { b.disabled = false; toast(err.message); return; }
+    const who = esc(firstName(r.name));
+    sh.set(`<div class="step"><div class="hero-ic tone-ok">${icon('inbox')}</div>
+      <h2>${r.sent ? `We texted ${who}` : `Your log is ready for ${who}`}</h2>
+      <p>${r.sent ? 'The link in their text shows your log as it stands whenever they open it.' : 'This system is not sending texts yet.'} You can stop sharing any time from this page.</p>
+      ${r.demo_link ? `<p class="callout ok small">${icon('note')}<span>Demo: the text to ${who} would carry this link.<br>
+        <a href="${esc(r.demo_link)}" target="_blank" rel="noopener">Open it as ${who}</a></span></p>` : ''}
+      <button class="btn block" data-close type="button">Done</button></div>`);
+    loadShares();
+  };
+}
+
+async function stopSharing(id) {
+  try { await api(`/api/my/shares/${id}`, { method: 'DELETE' }); toast('They can no longer open your log.'); loadShares(); }
+  catch (e) { toast(e.message); }
+}
+
+/* ---------- meetings a participant adds ---------- */
 
 function personalMeeting() {
   const sh = sheet(`<form class="step left" id="pm">
-    <h2>Track a personal meeting</h2>
-    <p class="muted">For appointments that aren't on the list, like therapy. It starts now, where you are.</p>
-    <p class="callout">${icon('eye')} Only you can see these. They don't count toward your court requirement.</p>
+    <h2>Add a meeting that isn't listed</h2>
+    <p class="muted">For a meeting you're at right now that isn't on the list. It starts now, where you are.</p>
+    <p class="callout">${icon('eye')} It counts toward your requirement. Your log marks it as added by you, with where your phone was, so whoever reads it can tell.</p>
     <label for="pm-name">What is it?</label>
-    <input id="pm-name" required maxlength="120" placeholder="For example: Therapy with Dr. Patel" autocomplete="off">
+    <input id="pm-name" required maxlength="120" placeholder="For example: Tuesday night AA" autocomplete="off">
+    <label for="pm-where">Where is it?</label>
+    <input id="pm-where" required maxlength="200" placeholder="For example: St. Mary's Church, 123 Main St" autocomplete="off">
     <div class="two">
       <div><label for="pm-cat">Type</label>
-        <select id="pm-cat"><option value="therapy">Therapy</option><option value="private">Support group</option>
-        <option value="community_service">Volunteering</option><option value="public">Other meeting</option></select></div>
+        <select id="pm-cat"><option value="public">Recovery meeting</option><option value="private">Support group</option>
+        <option value="therapy">Therapy</option><option value="community_service">Volunteering</option></select></div>
       <div><label for="pm-len">Length</label>
         <select id="pm-len"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div>
     </div>
     <button class="btn block" type="submit">Start and check in</button>
-  </form>`, { label: 'Track a personal meeting' });
+  </form>`, { label: 'Add a meeting that isn\'t listed' });
   sh.body.querySelector('#pm-name').focus();
   sh.body.querySelector('#pm').onsubmit = async e => {
     e.preventDefault();
     const name = sh.body.querySelector('#pm-name').value.trim();
+    const address = sh.body.querySelector('#pm-where').value.trim();
     const category = sh.body.querySelector('#pm-cat').value;
     const duration_min = Number(sh.body.querySelector('#pm-len').value);
     if (!(await primeLocation(sh))) return;
     const draft = { id: 0, name, opens_at: new Date().toISOString() };
     await runCheckIn(sh, draft, async ({ lat, lng, accuracy_m }) => {
       const m = await api('/api/meetings', { method: 'POST', body: JSON.stringify({
-        name, category, lat, lng, duration_min, starts_at: new Date().toISOString() }) });
+        name, category, address, lat, lng, duration_min, starts_at: new Date().toISOString() }) });
       return api('/api/checkins', { method: 'POST',
         body: JSON.stringify({ meeting_id: m.id, lat, lng, accuracy_m }) });
     });
@@ -993,7 +1039,7 @@ function histRow(c) {
   return `<li><button class="hist-row" data-act="detail" data-id="${c.id}" type="button">
     <span class="dot tone-${s.tone}">${icon(s.icon)}</span>
     <span class="h-main"><b>${esc(c.meeting.name)}</b>
-      <span class="muted small">${esc(relativeDay(c.checked_in_at))}, ${time(c.checked_in_at)}${c.meeting.counts ? '' : ' · only you'}${
+      <span class="muted small">${esc(relativeDay(c.checked_in_at))}, ${time(c.checked_in_at)}${c.meeting.added ? ' · added by you' : ''}${
         c.confirmed_by?.state === 'confirmed' ? ` · ${esc(firstName(c.confirmed_by.name))} confirmed` : ''}</span></span>
     <span class="h-state tone-${s.tone}">${esc(s.label)}</span>
     ${icon('arrow', 'muted chev')}
