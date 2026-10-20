@@ -70,7 +70,7 @@ def password_problem(password: str, *, email: str | None = None) -> str | None:
 # breach list (k-anonymity API or a local dump); this is the cheap version.
 COMMON_PASSWORDS = {
     "password1234", "passw0rd1234", "123456789012", "qwertyuiop12",
-    "meetingscount", "letmein12345", "welcome12345", "iloveyou1234",
+    "meetingscount", "actionscount", "letmein12345", "welcome12345", "iloveyou1234",
 }
 
 
@@ -144,7 +144,7 @@ def totp_verify(secret: str | None, code: str, at: float | None = None, window: 
                for offset in range(-window, window + 1))
 
 
-def totp_uri(secret: str, account: str, issuer: str = "MeetingsCount") -> str:
+def totp_uri(secret: str, account: str, issuer: str = "ActionsCount+") -> str:
     from urllib.parse import quote
     return (f"otpauth://totp/{quote(issuer)}:{quote(account)}"
             f"?secret={secret}&issuer={quote(issuer)}&digits=6&period=30")

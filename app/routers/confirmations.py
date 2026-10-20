@@ -152,7 +152,7 @@ def ask(checkin_id: int, body: AskIn, request: Request, background: BackgroundTa
 
     if sms.opted_out(db, number):
         raise HTTPException(409, f"{confirming.first_name(name)} has asked not to get texts from "
-                                 "MeetingsCount. Ask someone else, or ask them to text START "
+                                 f"{confirming.BRAND}. Ask someone else, or ask them to text START "
                                  "to the number first.")
     earlier = db.scalars(select(Confirmation).where(Confirmation.checkin_id == c.id)).all()
     if any(x.phone == number and x.open for x in earlier):
@@ -324,17 +324,17 @@ async def inbound(request: Request, background: BackgroundTasks, db: Session = D
         pending = [x for x in db.scalars(select(Confirmation).where(Confirmation.phone == frm)
                                          .order_by(Confirmation.asked_at.desc())).all() if x.open]
         if not pending:
-            return _twiml("MeetingsCount: there is no open question for this number. "
+            return _twiml("ActionsCount+: there is no open question for this number. "
                           "If you were asked to confirm a meeting, use the link in that text.")
         if len(pending) > 1:
-            return _twiml("MeetingsCount: you have more than one question open. Please use the "
+            return _twiml("ActionsCount+: you have more than one question open. Please use the "
                           "link in each text.")
         x = pending[0]
         confirming.answer(db, x, yes, via="text", ip=client_ip(request))
         _audit_answer(db, x, request)
         background.add_task(_send_answer, x.id)
         who = db.get(User, x.user_id)
-        return _twiml(f"MeetingsCount: thank you. {confirming.first_name(who.name)} will get a "
+        return _twiml(f"ActionsCount+: thank you. {confirming.first_name(who.name)} will get a "
                       "text with your answer.")
     return _twiml()
 
@@ -396,7 +396,7 @@ def sms_test(body: TestTextIn, request: Request, db: Session = Depends(get_db),
     if too_many(f"sms-test:{user.id}", 5, 900):
         raise HTTPException(429, "Five test texts every fifteen minutes is plenty.")
     county = db.get(County, user.county_id) if user.county_id else None
-    row = sms.send(db, phone, f"MeetingsCount: a test text from {county.name if county else 'the dashboard'}. "
+    row = sms.send(db, phone, f"ActionsCount+: a test text from {county.name if county else 'the dashboard'}. "
                               "Nothing to do. Reply STOP to opt out.",
                    purpose="test", user_id=user.id, county_id=user.county_id)
     audit(db, user, "send_test_text", detail=f"{sms.mask(phone)}: {row.status}"

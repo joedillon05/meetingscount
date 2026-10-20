@@ -69,7 +69,7 @@ function renderShell() {
   const admin = S.me.role === 'admin' || S.me.role === 'superuser';
   app.innerHTML = `
     <header class="top">
-      <a class="brand" href="#caseload">${logo()}<span>MeetingsCount</span></a>
+      <a class="brand" href="#caseload">${logo()}<span>ActionsCount+</span></a>
       ${S.me.county ? `<span class="org">${esc(S.me.county)}</span>` : ''}
       <nav class="nav" aria-label="Sections">
         <a data-nav="caseload" href="#caseload">${icon('users')}<span>Caseload</span></a>
@@ -721,7 +721,7 @@ function deleteMeeting(id, name) {
 function firstPassword() {
   app.innerHTML = `<main class="signin-page">
     <form class="card signin-card" id="firstPw" novalidate>
-      <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+      <div class="signin-head">${logo()}<b>ActionsCount+</b></div>
       <h1>Choose your own password</h1>
       <p class="muted">You signed in with a password somebody else picked and read out to you.
         Choose one only you know before going any further. At least 12 characters.</p>
@@ -1022,7 +1022,7 @@ function switchUser() {
 function signIn({ email = '', mfa = false, message = '' } = {}) {
   app.innerHTML = `<main class="signin-page">
     <form class="card signin-card" id="signinForm" novalidate>
-      <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+      <div class="signin-head">${logo()}<b>ActionsCount+</b></div>
       <h1>${mfa ? 'One more step' : 'Staff sign-in'}</h1>
       <p class="muted">${mfa ? 'Enter the six-digit code from your authenticator app.'
         : 'For probation officers and county staff. Participants use the phone app.'}</p>
@@ -1166,7 +1166,7 @@ async function mfaSheet(enabled) {
     <h2>Set up an authenticator app</h2>
     <p class="muted">In Google Authenticator, 1Password, Authy or similar, add an account by hand and type this key:</p>
     <p class="secret">${esc(start.formatted)}</p>
-    <p class="fine">Account: ${esc(S.me.name)} · Issuer: MeetingsCount · 6 digits · 30 seconds</p>
+    <p class="fine">Account: ${esc(S.me.name)} · Issuer: ActionsCount+ · 6 digits · 30 seconds</p>
     <label>Then enter the code it shows<input name="code" inputmode="numeric" maxlength="6"
       class="code-input" placeholder="000000" autocomplete="one-time-code" required></label>
     <p class="err" role="alert" hidden></p>
@@ -1194,7 +1194,7 @@ function participantHere() {
 }
 
 function fatal(e) {
-  app.innerHTML = `<main class="center-screen">${icon('alert', 'lg')}<h1>MeetingsCount could not load</h1>
+  app.innerHTML = `<main class="center-screen">${icon('alert', 'lg')}<h1>ActionsCount+ could not load</h1>
     <p class="muted">${esc(e.message)}</p><button class="btn" type="button" data-reload>Try again</button></main>`;
   app.querySelector('[data-reload]').onclick = () => location.reload();
 }

@@ -136,7 +136,7 @@ def test_sponsor_gets_one_text_and_confirms_from_the_link(client, ids, phones):
     texts = phones.to("+17345550199")
     assert len(texts) == 1
     body = texts[0]
-    assert body.startswith("MeetingsCount:") and "Dana R." in body and "Loop test" in body
+    assert body.startswith("ActionsCount+:") and "Dana R." in body and "Loop test" in body
     assert "STOP" in body, "a text to someone who never signed up says how to stop them"
     assert "probation" not in body.lower() and "court" not in body.lower()
     token = _link(body).group(1)
@@ -466,7 +466,7 @@ def test_admin_sees_the_setup_sends_a_test_and_reads_the_log(client, ids, phones
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "sent" and r.json()["to"] == "(734) 555 ... 0170"
     body = phones.to("+17345550170")[0]
-    assert body.startswith("MeetingsCount:") and "test" in body.lower() and "STOP" in body
+    assert body.startswith("ActionsCount+:") and "test" in body.lower() and "STOP" in body
 
     log = client.get("/api/sms/log", headers=as_(ids["admin"])).json()
     assert log[0]["purpose"] == "test" and log[0]["to"] == "(734) 555 ... 0170"

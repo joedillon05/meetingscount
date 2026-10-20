@@ -1,6 +1,6 @@
 {
-  "name": "MeetingsCount",
-  "short_name": "MeetingsCount",
+  "name": "ActionsCount+",
+  "short_name": "ActionsCount+",
   "description": "Check in to your meetings and see your progress.",
   "id": "/",
   "start_url": "/#today",

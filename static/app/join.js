@@ -11,7 +11,7 @@ function logo() {
   return `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--brand)"/>
     <path d="M9.5 16.5l4.2 4.2 8.8-9.4" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
-const head = () => `<div class="join-head">${logo()}<b>MeetingsCount</b></div>`;
+const head = () => `<div class="join-head">${logo()}<b>ActionsCount+</b></div>`;
 const steps = n => `<div class="steps" aria-hidden="true">${[1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</div>`;
 
 async function boot() {
@@ -43,7 +43,7 @@ function renderProfile() {
   app.innerHTML = `<main class="join">
     ${head()}${steps(1)}
     <h1>Create your profile</h1>
-    <p class="lead">For people whose court or program is not on MeetingsCount yet. You pay for it yourself and keep your own verified record of every meeting.</p>
+    <p class="lead">For people whose court or program is not on ActionsCount+ yet. You pay for it yourself and keep your own verified record of every meeting.</p>
     <form id="profileForm" novalidate>
       <label for="name">Your name <span class="muted">as your officer knows it</span></label>
       <input id="name" name="name" autocomplete="name" maxlength="120" required>
@@ -148,7 +148,7 @@ function renderPay({ canceled = false, created = false } = {}) {
       <summary>Have a code?</summary>
       <label for="code">Promotion code</label>
       <input id="code" name="code" autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="For example FREEYEAR">
-      <p class="fine">A code from MeetingsCount is applied on the next page. With a code that covers the whole cost, no card is asked for.</p>
+      <p class="fine">A code from ActionsCount+ is applied on the next page. With a code that covers the whole cost, no card is asked for.</p>
     </details>` : ''}
     <p class="err" id="err" role="alert" hidden></p>
     <button class="btn block ghost" type="button" data-signout>Not now, sign out</button>
@@ -194,14 +194,14 @@ function allSet({ county = false, created = false } = {}) {
   app.innerHTML = `<main class="join center">${head()}
     <div class="hero-ic tone-ok">${icon('check')}</div>
     <h1>${created ? 'You are all set' : `Hi, ${esc(firstName(S.me.name))}`}</h1>
-    <p class="lead">${county ? 'Your county covers MeetingsCount for you, so there is nothing to pay.'
+    <p class="lead">${county ? 'Your county covers ActionsCount+ for you, so there is nothing to pay.'
       : esc(b.words)}</p>
     <ul class="plain" style="text-align:left">
       <li>Open the app and read the short consent screen.</li>
       <li>Pick your town to see meetings near you.</li>
       <li>Tap check in when you arrive. One tap, no paper.</li>
     </ul>
-    <a class="btn block big" href="/">Open MeetingsCount</a>
+    <a class="btn block big" href="/">Open ActionsCount+</a>
     <button class="btn block ghost" type="button" data-signout>Sign out</button>
   </main>`;
   app.querySelector('[data-signout]').onclick = signOut;
@@ -212,7 +212,7 @@ function allSet({ county = false, created = false } = {}) {
 function closed() {
   app.innerHTML = `<main class="join">${head()}
     <h1>Not open here yet</h1>
-    <p class="lead">Profiles on this MeetingsCount are set up by your probation officer or program. Ask them to enrol you, and they will give you a sign-in code.</p>
+    <p class="lead">Profiles on this ActionsCount+ are set up by your probation officer or program. Ask them to enrol you, and they will give you a sign-in code.</p>
     <a class="btn block" href="/">Go to sign-in</a>
   </main>`;
 }
@@ -229,7 +229,7 @@ function staffHere() {
 
 function fatal(e) {
   app.innerHTML = `<main class="join center">${icon('alert', 'lg')}
-    <h1>MeetingsCount could not load</h1><p class="lead">${esc(e.message)}</p>
+    <h1>ActionsCount+ could not load</h1><p class="lead">${esc(e.message)}</p>
     <button class="btn block" type="button" onclick="location.reload()">Try again</button></main>`;
 }
 

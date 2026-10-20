@@ -3,7 +3,7 @@ Self-serve profiles, and the subscription that pays for them, through Stripe.
 
 Most participants are enrolled by their county and never see a price. This
 is for everyone else: someone under an order whose county is not on
-MeetingsCount creates a profile at /join, proves the phone number is theirs
+ActionsCount+ creates a profile at /join, proves the phone number is theirs
 with a code, and pays on Stripe's hosted checkout page. They live in one
 county of their own (`County.self_serve`), which has no officers.
 

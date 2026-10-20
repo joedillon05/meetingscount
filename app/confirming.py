@@ -34,6 +34,9 @@ RELATIONSHIPS = {
 
 ASKS_PER_CHECKIN = 3
 
+# The name every text starts with. Carriers want the sender named in each one.
+BRAND = "ActionsCount+"
+
 
 # --------------------------------------------------------------------------- #
 # Names, times, words
@@ -83,31 +86,41 @@ def relationship_words(key: str | None) -> str:
 # --------------------------------------------------------------------------- #
 
 def code_text(code: str, minutes: int) -> str:
-    return (f"MeetingsCount: your sign-in code is {code}. It works for {minutes} minutes. "
+    return (f"{BRAND}: your sign-in code is {code}. It works for {minutes} minutes. "
             "Do not share it with anyone.")
 
 
 def welcome_text() -> str:
-    return ("MeetingsCount will text you sign-in codes and answers from people you ask to "
+    return (f"{BRAND} will text you sign-in codes and answers from people you ask to "
             "confirm a check-in. Reply STOP to opt out, HELP for help. Message and data rates "
             "may apply.")
 
 
+def ready_text(name: str, url: str) -> str:
+    return (f"{BRAND}: hi {first_name(name)}, your account is ready on the new site. Sign in at "
+            f"{url} with this phone number and we will text you a code. Reply STOP to opt out.")
+
+
+def share_text(participant: str, link: str) -> str:
+    return (f"{BRAND}: {short_name(participant)} shared their meeting log with you. It stays "
+            f"up to date whenever you open it: {link}\nReply STOP to opt out.")
+
+
 def ask_text(participant: str, meeting: str, when: str, link: str) -> str:
-    return (f"MeetingsCount: {short_name(participant)} asked you to confirm they were at "
+    return (f"{BRAND}: {short_name(participant)} asked you to confirm they were at "
             f"{meeting} {when}. Tap to answer: {link}\nReply STOP to opt out.")
 
 
 def receipt_text(meeting: str, out_at: str, confirmer: str) -> str:
-    return (f"MeetingsCount: you checked out of {meeting} at {out_at}. We texted "
+    return (f"{BRAND}: you checked out of {meeting} at {out_at}. We texted "
             f"{first_name(confirmer)} to confirm you were there.")
 
 
 def answer_text(confirmer: str, meeting: str, yes: bool) -> str:
     who = first_name(confirmer)
     if yes:
-        return f"MeetingsCount: {who} confirmed you were at {meeting}. It is on your record."
-    return (f"MeetingsCount: {who} could not confirm you were at {meeting}. You can add a note "
+        return f"{BRAND}: {who} confirmed you were at {meeting}. It is on your record."
+    return (f"{BRAND}: {who} could not confirm you were at {meeting}. You can add a note "
             "in the app, and your officer will see both.")
 
 

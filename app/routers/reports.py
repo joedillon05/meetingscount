@@ -1,7 +1,7 @@
 """
 Compliance reports. This is the artifact a probation officer attaches to a
 file, so it is deliberately conservative in its wording: it reports what
-MeetingsCount confirmed, never that someone "did not attend".
+ActionsCount+ confirmed, never that someone "did not attend".
 
 Each report carries a SHA-256 of its own content so a printed copy can be
 checked against the record later.
@@ -102,7 +102,7 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
         "summary": compliance.summarize(db, p, tz),
         "requirements": requirements,
         "check_ins": lines,
-        "note": ("MeetingsCount reports confirmed attendance only. An entry that is not "
+        "note": ("ActionsCount+ reports confirmed attendance only. An entry that is not "
                  "confirmed means this system could not verify it, which is not by itself "
                  "evidence that the participant was absent."),
     }

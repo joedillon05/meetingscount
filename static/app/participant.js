@@ -169,7 +169,7 @@ function renderShell() {
   document.body.classList.remove('bare');
   app.innerHTML = `
     <header class="bar">
-      <span class="brand">${logo()}<span>MeetingsCount</span></span>
+      <span class="brand">${logo()}<span>ActionsCount+</span></span>
       ${S.devUsers ? `<button class="chip demo" data-act="switch" type="button">Demo · ${esc(firstName(S.me.name))}</button>` : ''}
     </header>
     <div class="offline" id="offline" hidden>${icon('wifi')} You are offline. Check-in needs a connection.</div>
@@ -533,7 +533,7 @@ async function primeLocation(sh) {
   const ok = await confirmStep(sh, {
     icon: 'pin',
     title: 'Your location, once',
-    body: 'To confirm you are at the meeting, MeetingsCount reads your location one time, right now. Your phone will ask for permission. It is never read in the background.',
+    body: 'To confirm you are at the meeting, ActionsCount+ reads your location one time, right now. Your phone will ask for permission. It is never read in the background.',
     yes: 'Continue', no: 'Not now',
   });
   try { localStorage.setItem('mc_loc_primed', '1'); } catch { /* ignore */ }
@@ -646,7 +646,7 @@ function locationHelp() {
   return `<div class="step">
     <div class="hero-ic warn">${icon('pin')}</div>
     <h2>Location is turned off for this site</h2>
-    <p>MeetingsCount needs your location at the moment you check in. To turn it back on:</p>
+    <p>ActionsCount+ needs your location at the moment you check in. To turn it back on:</p>
     <ol class="how">${ios
       ? '<li>Open <b>Settings</b>, then <b>Privacy &amp; Security</b>, then <b>Location Services</b>.</li><li>Turn it on, then find <b>Safari Websites</b> and choose <b>While Using the App</b>.</li><li>Come back here and try again.</li>'
       : '<li>Tap the icon to the left of the web address.</li><li>Choose <b>Permissions</b> or <b>Site settings</b>, then allow <b>Location</b>.</li><li>Come back here and try again.</li>'}</ol>
@@ -1122,7 +1122,7 @@ function viewYou() {
       <p class="small muted">Dev auth is on, so there is no sign-in. Switch between the demo participants to see each story.</p>
       <button class="btn secondary block" data-act="switch" type="button">Switch participant</button>
     </section>` : ''}
-    <p class="fine center">MeetingsCount · <a href="/officer">Staff sign-in</a></p>
+    <p class="fine center">ActionsCount+ · <a href="/officer">Staff sign-in</a></p>
   </div>`;
 }
 
@@ -1131,7 +1131,7 @@ async function exportRecord() {
     const r = await fetch('/api/my/export', { headers: { 'X-MC-User': identity.get() } });
     if (!r.ok) throw new Error('Could not prepare your record. Try again.');
     const blob = await r.blob();
-    const name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'meetingscount-record.json';
+    const name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'actionscount-record.json';
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1175,7 +1175,7 @@ function renderConsent() {
   const me = S.me, pol = me.policy, years = Math.round(pol.record_retention_days / 365);
   const officer = me.officer || (me.billing ? 'Whoever you share your record with' : 'Your officer');
   app.innerHTML = `<main class="consent">
-    <div class="consent-head">${logo()}<p class="muted">MeetingsCount${me.county ? ` for ${esc(me.county)}` : ''}</p></div>
+    <div class="consent-head">${logo()}<p class="muted">ActionsCount+${me.county ? ` for ${esc(me.county)}` : ''}</p></div>
     <h1>Before your first check&#8209;in</h1>
     <p class="lead">Here is exactly what this app records and who sees it. It takes a minute to read.</p>
     <ol class="promises">
@@ -1211,7 +1211,7 @@ function renderPayWall() {
   document.body.classList.add('bare');
   const b = S.me.billing;
   app.innerHTML = `<main class="consent">
-    <div class="consent-head">${logo()}<p class="muted">MeetingsCount</p></div>
+    <div class="consent-head">${logo()}<p class="muted">ActionsCount+</p></div>
     <h1>${b.status === 'unpaid_yet' ? 'One more step' : 'Your subscription needs attention'}</h1>
     <p class="lead">${esc(b.words)}</p>
     ${b.price ? `<p class="callout">${icon('note')} <span>${b.trial ? `${esc(b.trial)}, then ${esc(b.price.label)}` : esc(b.price.label)}. Cancel any time from here.</span></p>` : ''}
@@ -1261,9 +1261,9 @@ function renderSignIn(phone = '') {
   document.body.classList.add('bare');
   S.started = false;
   app.innerHTML = `<main class="signin">
-    <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+    <div class="signin-head">${logo()}<b>ActionsCount+</b></div>
     <h1>Sign in</h1>
-    <p class="lead">Enter the phone number your officer has on file. We will check a one-time code, not a password.</p>
+    <p class="lead">Enter the mobile number on your account. We will check a one-time code, not a password.</p>
     <form id="phoneForm" novalidate>
       <label for="phone">Phone number</label>
       <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
@@ -1294,7 +1294,7 @@ function renderSignIn(phone = '') {
 
 function renderCodeStep(phone, sent) {
   app.innerHTML = `<main class="signin">
-    <div class="signin-head">${logo()}<b>MeetingsCount</b></div>
+    <div class="signin-head">${logo()}<b>ActionsCount+</b></div>
     <h1>Enter your code</h1>
     <p class="lead">${sent.delivered
       ? esc(sent.message || `We sent a six-digit code to ${phone}.`)
@@ -1353,7 +1353,7 @@ function renderStaffHere() {
 function renderFatal(e) {
   document.body.classList.add('bare');
   app.innerHTML = `<main class="consent center">${icon('alert', 'lg')}
-    <h1>MeetingsCount could not load</h1><p class="lead">${esc(e.message)}</p>
+    <h1>ActionsCount+ could not load</h1><p class="lead">${esc(e.message)}</p>
     <button class="btn block" data-act="reload" type="button">Try again</button></main>`;
 }
 

@@ -151,4 +151,4 @@ def my_export(request: Request, db: Session = Depends(get_db),
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return Response(json.dumps(body, indent=2), media_type="application/json",
                     headers={"Content-Disposition":
-                             f'attachment; filename="meetingscount-record-{stamp}.json"'})
+                             f'attachment; filename="actionscount-record-{stamp}.json"'})

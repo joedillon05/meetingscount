@@ -115,7 +115,7 @@ class County(Base):
     default_window_min: Mapped[int] = mapped_column(Integer, default=60)
     retention_days: Mapped[int] = mapped_column(Integer, default=1095)   # 3 years
     # The one county that holds people who signed up on their own and pay
-    # for MeetingsCount themselves. It has no officers; see app/billing.py.
+    # for ActionsCount+ themselves. It has no officers; see app/billing.py.
     self_serve: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 

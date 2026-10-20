@@ -1,5 +1,5 @@
 """
-MeetingsCount API.
+ActionsCount+ API.
 
     uvicorn app.main:app --reload
 
@@ -45,10 +45,10 @@ if os.environ.get("MC_ENV") == "production" and (settings.DEMO or settings.DEV_A
     )
 
 if settings.DEMO:
-    print("MeetingsCount: MC_DEMO is on. The sign-in screen lists the demo accounts and "
+    print("ActionsCount+: MC_DEMO is on. The sign-in screen lists the demo accounts and "
           "participant sign-in codes are shown on screen. Demo data only.")
 if settings.DEV_AUTH:
-    print("MeetingsCount: MC_DEV_AUTH is on. Anyone can claim to be anyone with a header. "
+    print("ActionsCount+: MC_DEV_AUTH is on. Anyone can claim to be anyone with a header. "
           "Local development only.")
 
 
@@ -63,7 +63,7 @@ async def lifespan(_app: FastAPI):
 IS_PRODUCTION = os.environ.get("MC_ENV") == "production"
 
 app = FastAPI(
-    title="MeetingsCount",
+    title="ActionsCount+",
     version="0.4.0",
     description="Verifiable attendance for court-ordered meetings.",
     lifespan=lifespan,
@@ -133,8 +133,8 @@ async def preview_gate(request, call_next):
             given = ""
     if not secrets.compare_digest(given, settings.ACCESS_PASSWORD):
         return PlainTextResponse(
-            "MeetingsCount preview. Ask Joe for the password.", status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="MeetingsCount preview", charset="UTF-8"'})
+            "ActionsCount+ preview. Ask Joe for the password.", status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="ActionsCount+ preview", charset="UTF-8"'})
     return await call_next(request)
 
 

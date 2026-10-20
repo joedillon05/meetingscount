@@ -35,7 +35,7 @@ export function makeApi(identity) {
     } catch {
       throw new ApiError(0, navigator.onLine === false
         ? 'You are offline. Connect to the internet and try again.'
-        : 'Could not reach MeetingsCount. Check your connection and try again.');
+        : 'Could not reach ActionsCount+. Check your connection and try again.');
     }
     if (!r.ok) {
       let msg = `Something went wrong (${r.status}).`;

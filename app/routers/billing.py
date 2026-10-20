@@ -32,7 +32,7 @@ def _self_serve(db: Session, user: User):
         raise HTTPException(403, "Billing is for participants who pay for their own profile.")
     row = billing.row_for(db, user)
     if row is None:
-        raise HTTPException(404, "Your county covers MeetingsCount for you. There is nothing to pay.")
+        raise HTTPException(404, "Your county covers ActionsCount+ for you. There is nothing to pay.")
     return row
 
 

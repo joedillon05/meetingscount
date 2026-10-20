@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MeetingsCount - Ops</title>
+<title>ActionsCount+ - Ops</title>
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/static/style.css">
 <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 <div class="topbar">
-  <span class="brand">MeetingsCount</span>
+  <span class="brand">ActionsCount+</span>
   <nav><a href="/officer">Caseload</a><a class="active" href="/ops">Ops</a><a href="/">Check in</a><a href="/docs" target="_blank">API</a></nav>
   <span class="spacer"></span>
   <span class="small muted" id="badge"></span>
@@ -41,7 +41,7 @@
 
 <main>
   <details class="card" id="how" open>
-    <summary>How MeetingsCount decides whether someone was really there</summary>
+    <summary>How ActionsCount+ decides whether someone was really there</summary>
     <div class="how">
       <div class="step"><b>1. A meeting exists</b>Lat/lng, start time, length, an allowed radius (500 ft default, wider downtown where GPS bounces off buildings), and a check-in window (&plusmn;60 min around the start).</div>
       <div class="step"><b>2. The participant taps Check in</b>Their phone reports where it thinks it is plus an accuracy figure. That pin is stored exactly as reported. The server, not the phone, stamps the time.</div>

@@ -1,4 +1,8 @@
-# MeetingsCount
+# MeetingsCount (ActionsCount+)
+
+The product is called ActionsCount+ everywhere a person sees it: the app,
+texts, the report and the home-screen icon. MeetingsCount survives only in
+code names nobody sees (the repository, `MC_*` settings, the Fly app name).
 
 Verifiable attendance for court-ordered meetings. A participant taps check in,
 their phone's GPS pins the location, the server scores it against the meeting's

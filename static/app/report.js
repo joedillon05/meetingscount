@@ -58,17 +58,18 @@ function render(d) {
           <h1>Attendance report</h1>
           <p class="muted">${esc(d.county || '')}${d.program ? ` · ${esc(d.program)}` : ''}</p>
         </div>
-        <div class="rep-brand">${logo()}<b>MeetingsCount</b></div>
+        <div class="rep-brand">${logo()}<b>ActionsCount+</b></div>
       </header>
 
       <section class="rep-who">
         <dl>
           <div><dt>Participant</dt><dd>${esc(d.participant)}</dd></div>
           <div><dt>Case number</dt><dd>${esc(d.case_number || 'not recorded')}</dd></div>
-          <div><dt>Supervising officer</dt><dd>${esc(d.officer || 'not recorded')}</dd></div>
+          <div><dt>Supervising officer</dt><dd>${esc(d.officer || 'none on file')}</dd></div>
           <div><dt>Enrolled</dt><dd>${esc(shortDay(d.enrolled_on))}</dd></div>
           <div><dt>Period covered</dt><dd>${esc(shortDay(d.period_from))} to ${esc(shortDay(d.generated_at))} (${d.period_days} days)</dd></div>
           <div><dt>Prepared</dt><dd>${esc(dateTime(d.generated_at))}${d.generated_by ? ` by ${esc(d.generated_by)}` : ''}</dd></div>
+          ${d.shared_with ? `<div><dt>Shared with</dt><dd>${esc(d.shared_with)}, by the participant</dd></div>` : ''}
         </dl>
       </section>
 

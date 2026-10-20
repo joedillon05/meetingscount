@@ -24,7 +24,7 @@ function logo() {
     <path d="M9.5 16.5l4.2 4.2 8.8-9.4" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
-const head = () => `<div class="brand">${logo()}<span>MeetingsCount</span></div>`;
+const head = () => `<div class="brand">${logo()}<span>ActionsCount+</span></div>`;
 
 async function boot() {
   let d;
@@ -58,7 +58,7 @@ function question(d) {
     <label for="note">Anything to add <span class="muted">(optional)</span></label>
     <textarea id="note" rows="2" maxlength="400" placeholder="For example: they stayed the whole hour."></textarea>
     <p class="fine">You got a text because ${esc(d.participant)} entered your number. This page does not read your location.
-      Reply STOP to any text from MeetingsCount to stop them.</p>`);
+      Reply STOP to any text from ActionsCount+ to stop them.</p>`);
   app.querySelectorAll('[data-answer]').forEach(b => {
     b.onclick = async () => {
       app.querySelectorAll('button').forEach(x => { x.disabled = true; });
