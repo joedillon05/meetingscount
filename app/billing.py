@@ -213,7 +213,7 @@ def status_out(db: Session, user: User) -> dict | None:
         "can_pay": settings.stripe_configured and row.status in (
             "unpaid_yet", "canceled", "unpaid", "incomplete", "incomplete_expired"),
         "can_manage": settings.stripe_configured and bool(row.stripe_customer_id)
-        and row.status not in ("unpaid_yet", "demo"),
+        and row.status not in ("unpaid_yet", "demo", "covered"),
         "price": price_info(),
         "trial": trial_words(settings.STRIPE_TRIAL_DAYS) if settings.stripe_configured else None,
     }
@@ -224,6 +224,7 @@ def status_words(row: Subscription) -> str:
     return {
         "unpaid_yet": "Not set up yet. Pay once and you are in.",
         "demo": "Demo profile. No payment needed here.",
+        "covered": "Covered. No payment needed.",
         "trialing": f"Free trial{f' until {when}' if when else ''}.",
         "active": (f"Ends {when}. It will not renew." if row.cancel_at_period_end and when
                    else f"Active{f', renews {when}' if when else ''}."),

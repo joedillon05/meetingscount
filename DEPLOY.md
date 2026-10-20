@@ -25,9 +25,12 @@ sign-in codes people are holding.
 
 ## Texts, through Twilio
 
-Two things go by text: sign-in codes, and the ask to a sponsor or chair to
-confirm a check-in (plus a short text back to the participant with the
-answer). Nothing is sent until these are set. `fly secrets import` reads
+What goes by text: sign-in codes, the ask to a sponsor or chair to confirm
+a check-in (plus a short text back to the participant with the answer), a
+log a participant sends to someone, and the "your account is ready" text to
+people imported from the old site. The sending number has to be a Twilio
+number with toll-free verification or 10DLC registration approved; a
+personal cell cannot send through Twilio. Nothing is sent until these are set. `fly secrets import` reads
 them from the keyboard, so the auth token never lands in your shell history
 or a file. Type one per line, then Ctrl-D:
 
@@ -172,6 +175,28 @@ amount is yours to set.
 Note that no card number, expiry or CVC ever reaches this app. Checkout and
 the portal are Stripe pages on Stripe's domain; the app stores a customer
 id, a subscription id and a status word.
+
+## Moving people over from the old site
+
+People can come over two ways, and both end up the same: a self-pay profile
+with a weekly requirement.
+
+1. **They sign up themselves** at `/join` with their phone number.
+2. **You import a list.** A `.csv` or `.xlsx` with a header row: a name (or
+   first and last name) and a mobile number are needed; an email, meetings a
+   week and a start date are used when present. Copy it up and run:
+
+```bash
+fly ssh sftp shell                      # put people.csv /data/
+fly ssh console -C "python tools/import_people.py /data/people.csv"
+```
+
+That only shows what would happen. Add `--yes` to make the profiles. Add
+`--covered` if these people already paid on the old site, so no payment is
+asked of them, and `--text` to text each one that their account is ready,
+with the link. A number that already has an account is left alone, so the
+same list can be run again. Delete the file from `/data` afterwards: it is
+a list of names and phone numbers.
 
 ## The meeting directory
 

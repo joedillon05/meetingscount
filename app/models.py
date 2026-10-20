@@ -544,8 +544,9 @@ class Subscription(Base):
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     price_id: Mapped[str | None] = mapped_column(String(64))
     # Stripe's own words: trialing, active, past_due, canceled, unpaid,
-    # incomplete, incomplete_expired, paused. Plus two of ours: "unpaid_yet"
-    # before checkout has happened, and "demo" when there is no Stripe.
+    # incomplete, incomplete_expired, paused. Plus three of ours: "unpaid_yet"
+    # before checkout has happened, "demo" when there is no Stripe, and
+    # "covered" for someone who already paid on the old site and was moved over.
     status: Mapped[str] = mapped_column(String(24), default="unpaid_yet")
     current_period_end: Mapped[datetime | None] = mapped_column(UTCDateTime)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)

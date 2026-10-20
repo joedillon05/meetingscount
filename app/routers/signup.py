@@ -18,11 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import billing, confirming, sms
+from .. import billing, confirming, profiles, sms
 from ..auth import audit, client_ip, set_session_cookie, start_session
 from ..config import settings
 from ..db import get_db
-from ..models import Participant, Requirement, RequirementPeriod, Role, Signup, User
+from ..models import Role, Signup, User
 from ..schemas import SignupStartIn, SignupVerifyIn
 from ..security import clear_limit, keyed_hash, new_login_code, normalize_phone, too_many
 
@@ -113,19 +113,8 @@ def verify(body: SignupVerifyIn, request: Request, response: Response,
                                         User.active.is_(True)))
     created = user is None
     if created:
-        county, program = billing.self_serve_home(db)
-        user = User(county_id=county.id, role=Role.participant, name=row.name, email=row.email,
-                    phone=phone)
-        db.add(user)
-        db.flush()
-        p = Participant(county_id=county.id, user_id=user.id, program_id=program.id,
-                        officer_id=None, enrolled_on=now)
-        db.add(p)
-        db.flush()
-        db.add(Requirement(county_id=county.id, participant_id=p.id, category=None,
-                           count_required=row.per_week, period=RequirementPeriod.week,
-                           starts_on=row.starts_on, order_reference="self-reported"))
-        billing.ensure_row(db, user)
+        user = profiles.make_profile(db, name=row.name, phone=phone, email=row.email,
+                                     per_week=row.per_week, starts_on=row.starts_on)
     row.user_id = user.id
     db.commit()
 
