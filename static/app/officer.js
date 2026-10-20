@@ -866,6 +866,7 @@ const TEXT_STATUS = {
 const TEXT_PURPOSE = {
   login_code: 'Sign-in code', ask: 'Ask to confirm', receipt: 'Check-out receipt',
   answer: 'Answer to the participant', welcome: 'Opt-in notice', test: 'Test',
+  share: 'Log sent to someone', moved: 'Account ready (moved over)',
 };
 
 async function viewTexts() {
@@ -953,6 +954,8 @@ const ACTIONS = {
   accept_consent: 'Participant accepted consent', export_own_record: 'Participant downloaded their record',
   confirmation_asked: 'Participant asked someone to confirm a check-in', confirmation_answered: 'Someone answered a confirmation text',
   send_test_text: 'Sent a test text', set_area: 'Participant chose their town',
+  share_log: 'Participant sent their log to someone', stop_sharing_log: 'Participant stopped sharing their log',
+  open_shared_log: 'Someone opened a log sent to them', view_own_log: 'Participant opened their log',
   sms_opt_out: 'A number opted out of texts', login_code_requested: 'Participant asked for a sign-in code',
   issue_access_code: 'Issued a sign-in code', sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
   create_staff: 'Added a staff member', reset_staff_password: 'Reset a staff password', update_staff: 'Changed a staff account',

@@ -2,12 +2,19 @@
 // puts in a file. It is written for someone who has never seen this system,
 // including a judge, so every term is explained where it is used.
 //
-// Careful wording throughout: MeetingsCount confirms attendance, it never
+// Three ways in, one page: an officer's (?participant=ID), the participant's
+// own log (?mine=1), and a log the participant sent by text (/log/<token>).
+//
+// Careful wording throughout: ActionsCount+ confirms attendance, it never
 // asserts absence. "Could not be verified" is not "did not attend".
 
 import { $, dateTime, esc, feet, icon, makeApi, devIdentity, plural, setTimeZone, shortDay, time } from './lib.js';
 
-const api = makeApi(devIdentity('mc_act_staff'));
+const params = new URLSearchParams(location.search);
+const sharedToken = (location.pathname.match(/^\/log\/([A-Za-z0-9_-]+)/) || [])[1];
+const MODE = sharedToken ? 'shared' : params.get('mine') ? 'mine' : 'staff';
+const api = makeApi(MODE === 'shared' ? { get: () => '' }
+  : devIdentity(MODE === 'mine' ? 'mc_act_participant' : 'mc_act_staff'));
 const app = $('#app');
 
 const RESULT = {
@@ -22,15 +29,17 @@ const REQ_NOUN = { public: 'public meetings', community_service: 'community serv
   private: 'private meetings', therapy: 'therapy sessions', any: 'meetings' };
 
 async function boot() {
-  const params = new URLSearchParams(location.search);
   const pid = params.get('participant');
   const days = Number(params.get('days') || 90);
-  if (!pid) return fail('No participant was named in the link.');
+  if (MODE === 'staff' && !pid) return fail('No participant was named in the link.');
+  const url = { shared: `/api/shared/${sharedToken}`, mine: '/api/my/log',
+    staff: `/api/reports/participant/${pid}?days=${days}` }[MODE];
   let d;
   try {
-    d = await api(`/api/reports/participant/${pid}?days=${days}`);
+    d = await api(url);
   } catch (e) {
-    return fail(e.status === 401 ? 'Sign in on the dashboard first, then open this report again.' : e.message);
+    return fail(e.status === 401 ? (MODE === 'mine' ? 'Sign in on the app first, then open your log again.'
+      : 'Sign in on the dashboard first, then open this report again.') : e.message);
   }
   setTimeZone(d.timezone || 'America/Detroit');
   document.title = `Attendance report, ${d.participant}`;
@@ -38,15 +47,17 @@ async function boot() {
 }
 
 function fail(message) {
-  app.innerHTML = `<div class="sheetlike"><h1>Report not available</h1><p>${esc(message)}</p>
-    <p><a href="/officer">Back to the dashboard</a></p></div>`;
+  const back = { staff: '<p><a href="/officer">Back to the dashboard</a></p>', mine: '<p><a href="/">Back to the app</a></p>', shared: '' }[MODE];
+  app.innerHTML = `<div class="sheetlike"><h1>Report not available</h1><p>${esc(message)}</p>${back}</div>`;
 }
 
 function render(d) {
   const req = d.requirements[0];
   app.innerHTML = `
     <div class="toolbar no-print">
-      <a class="btn secondary" href="/officer#participant/${new URLSearchParams(location.search).get('participant')}">${icon('back')} Back to the record</a>
+      ${{ staff: `<a class="btn secondary" href="/officer#participant/${esc(params.get('participant'))}">${icon('back')} Back to the record</a>`,
+          mine: `<a class="btn secondary" href="/">${icon('back')} Back to the app</a>`,
+          shared: `<span class="small">Shared with ${esc(d.shared_with || 'you')} by ${esc(d.participant)}. It shows the latest whenever you open this link.</span>` }[MODE]}
       <span class="spacer"></span>
       <span class="muted small">Print, or save as PDF from the print dialog.</span>
       <button class="btn" id="print" type="button">${icon('file')} Print</button>
@@ -116,10 +127,10 @@ function periodTable(req) {
     <thead><tr><th>Week beginning</th><th>Required</th><th>Counted</th><th>Awaiting a decision</th><th>Outcome</th></tr></thead>
     <tbody>${req.history.map(h => `<tr${h.partial ? ' class="partial"' : ''}>
       <td>${esc(shortDay(h.starts))}${h.partial ? '<div class="muted">part week under the order</div>' : ''}</td>
-      <td>${h.required}</td>
-      <td>${h.counted}</td>
-      <td>${h.pending || ''}</td>
-      <td class="${h.partial ? '' : `s-${h.status}`}">${h.partial ? 'Not counted either way'
+      <td data-label="Required">${h.required}</td>
+      <td data-label="Counted">${h.counted}</td>
+      <td data-label="Awaiting">${h.pending || 0}</td>
+      <td data-label="Outcome" class="${h.partial ? '' : `s-${h.status}`}">${h.partial ? 'Not counted either way'
         : { met: 'Met', pending: 'Could still be met', short: 'Short' }[h.status]}</td>
     </tr>`).join('')}</tbody>
   </table>

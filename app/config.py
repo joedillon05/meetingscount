@@ -50,7 +50,7 @@ class Settings:
 
     # The wording of the participant consent screen. Bump it when the text
     # changes in a way people should agree to again.
-    CONSENT_VERSION: str = "2026-10"
+    CONSENT_VERSION: str = "2026-10-20"
 
     # One shared password in front of a preview deployment, so a demo on a
     # public URL is not a public demo. This is a door lock, not a sign-in:

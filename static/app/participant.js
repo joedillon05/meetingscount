@@ -188,7 +188,7 @@ function renderTab() {
   if (!v) return;
   if (!S.loaded) { v.innerHTML = S.loadError ? errorCard(S.loadError) : skeleton(); return; }
   v.innerHTML = { today: viewToday, history: viewHistory, you: viewYou }[S.tab]();
-  if (S.tab === 'you') loadPeople();
+  if (S.tab === 'you') { loadPeople(); loadShares(); }
 }
 
 const firstName = n => String(n || '').split(' ')[0];
@@ -1141,7 +1141,8 @@ function viewYou() {
         <li>Your location is read only when you tap check in or check out. Never in the background.</li>
         <li>Your officer sees whether each check-in was confirmed, not a map of where you go.</li>
         <li>Exact locations are deleted after ${pol.pin_retention_days} days. Results stay with your case for up to ${plural(years, 'year')}.</li>
-        <li>Personal meetings you track are visible only to you.</li>
+        <li>A meeting you add counts, and shows on your log as added by you, with where your phone was.</li>
+        <li>Your log goes to someone else only when you send it, and you can stop sharing any time.</li>
         <li>You can add a note to any result, and a person reviews anything unclear.</li>
       </ul>
       ${me.consent.accepted_at ? `<p class="fine">You agreed to this on ${esc(day(me.consent.accepted_at))}.</p>` : ''}
@@ -1154,8 +1155,17 @@ function viewYou() {
       <button class="btn secondary block" data-act="addperson" type="button">${icon('plus')} Add someone</button>
     </section>` : ''}
 
+    <section class="card" aria-labelledby="h-log">
+      <h2 class="sec flush" id="h-log">${icon('list')} Your log</h2>
+      <p class="small muted">Every check-in and what it counted for, ready to print or save as a PDF.${canAsk()
+        ? ' Send it to anyone who needs to see it: an officer, a lawyer, someone at home keeping track. They get a text with a link that always shows your latest log.' : ''}</p>
+      <a class="btn block" href="/report?mine=1">${icon('file')} Open my log</a>
+      ${canAsk() ? `<ul class="plain people-list" id="shareList"></ul>
+      <button class="btn secondary block" data-act="sharelog" type="button">${icon('inbox')} Send my log</button>` : ''}
+    </section>
+
     <button class="link-row" data-act="export" type="button">${icon('download')}
-      <span><b>Download my record</b><br><span class="muted small">Every check-in, reason and note, as a file you keep.</span></span>${icon('arrow', 'muted')}</button>
+      <span><b>Download my data</b><br><span class="muted small">Everything recorded about you, as a data file you keep.</span></span>${icon('arrow', 'muted')}</button>
 
     ${!standalone && (S.installPrompt || ios) ? `<button class="link-row" data-act="install" type="button">${icon('install')}
       <span><b>Add to your home screen</b><br><span class="muted small">Opens like an app, one tap from your home screen.</span></span>${icon('arrow', 'muted')}</button>` : ''}
@@ -1235,6 +1245,8 @@ function renderConsent() {
         <p>Every result comes with its reasons. You can add a note to any of them, and a person reviews anything unclear before it affects you.</p></div></li>
       <li>${icon('inbox')}<div><b>Texts, only about your check-ins</b>
         <p>A sign-in code when you ask for one, and a text when someone you chose confirms you were at a meeting. Reply STOP to any of them to stop.</p></div></li>
+      <li>${icon('list')}<div><b>Meetings you add, and your log</b>
+        <p>A meeting that isn't on the list can be added where you are. It counts, and your log marks it as added by you, with where your phone was. Your log goes to anyone else only if you send it, and you can stop sharing any time.</p></div></li>
     </ol>
     <button class="btn block big" id="agree" type="button">I understand, continue</button>
     <p class="fine center">You can reread this any time under <b>You</b>. ${S.devUsers ? `<button class="linkish" data-act="switch" type="button">Demo: switch participant</button>` : ''}</p>
@@ -1420,6 +1432,8 @@ app.addEventListener('click', e => {
     addperson: addPersonSheet,
     removeperson: () => removePerson(id),
     export: exportRecord,
+    sharelog: shareSheet,
+    stopshare: () => stopSharing(id),
     install,
     switch: switchUser,
     signout: signOut,

@@ -46,6 +46,24 @@
 .hash { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;
   background: #f3f4f6; padding: 8px 10px; border-radius: 6px; }
 
+/* A phone, which is where a log sent by text gets opened: one column, and
+   each table row becomes a short block instead of running off the screen. */
+@media screen and (max-width: 640px) {
+  .toolbar { flex-wrap: wrap; padding: 10px 16px; gap: 8px; position: static; }
+  .toolbar .spacer { display: none; }
+  .sheet-page { margin: 0; padding: 22px 16px 40px; box-shadow: none; }
+  .rep-head { flex-direction: column-reverse; gap: 10px; }
+  .rep-who dl { grid-template-columns: 1fr; }
+  .rep-who div { grid-template-columns: 120px 1fr; }
+  .rep-table thead { display: none; }
+  .rep-table, .rep-table tbody, .rep-table tr, .rep-table td { display: block; width: 100%; }
+  .rep-table tr { padding: 10px 0; border-bottom: 1px solid #e2e5ea; }
+  .rep-table td { border: 0; padding: 2px 0; }
+  .rep-table td:first-child { font-weight: 650; }
+  .rep-table td[data-label] { display: inline-block; width: auto; margin-right: 14px; }
+  .rep-table td[data-label]::before { content: attr(data-label) " "; color: #5b6270; font-weight: 400; }
+}
+
 @media print {
   @page { margin: 0.6in; }
   .report-body { background: #fff; }

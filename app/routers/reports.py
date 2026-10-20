@@ -92,9 +92,10 @@ def _build(db: Session, p: Participant, tz: str, days: int, *, by: User | None =
 
     body = {
         "participant": p.user.name, "case_number": p.case_number,
-        "county": county.name if county else None,
+        # The self-pay county is bookkeeping, not a court: it stays off the page.
+        "county": county.name if county and not county.self_serve else None,
         "timezone": tz,
-        "program": program.name if program else None,
+        "program": program.name if program and not (county and county.self_serve) else None,
         "officer": p.officer.name if p.officer else None,
         "enrolled_on": p.enrolled_on.isoformat(),
         "period_days": days,

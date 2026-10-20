@@ -85,6 +85,11 @@ class AreaIn(BaseModel):
     lng: float = Field(ge=-180, le=180)
 
 
+class ShareIn(BaseModel):
+    name: str = Field(max_length=120)
+    phone: str = Field(max_length=32)
+
+
 class TestTextIn(BaseModel):
     to: str = Field(max_length=32)
 

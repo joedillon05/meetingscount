@@ -557,7 +557,31 @@ class Subscription(Base):
     def active(self) -> bool:
         """Whether the person may use the app today. Past due keeps working
         while Stripe retries the card; canceled and unpaid do not."""
-        return self.status in ("active", "trialing", "past_due", "demo")
+        return self.status in ("active", "trialing", "past_due", "demo", "covered")
+
+
+class LogShare(Base):
+    """
+    A participant's log, shared by text with someone they chose: an officer
+    outside the system, a lawyer, a spouse keeping track. The link shows the
+    log as it stands whenever it is opened, until the participant stops
+    sharing. Only the token's hash is kept, as with confirmation links.
+    """
+    __tablename__ = "log_shares"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    phone: Mapped[str] = mapped_column(String(32))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_opened_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    opens: Mapped[int] = mapped_column(Integer, default=0)
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
 
 
 class AuditLog(Base):

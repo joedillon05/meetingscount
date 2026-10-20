@@ -34,7 +34,7 @@ from .config import settings
 from .db import create_all
 from .routers import (
     admin, auth, billing, caseload, checkins, confirmations, directory, me, meetings, reports,
-    reviews, signup,
+    reviews, sharing, signup,
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -85,7 +85,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router, confirmations.router,
-          directory.router, signup.router, billing.router):
+          directory.router, signup.router, billing.router, sharing.router):
     app.include_router(r)
 
 
@@ -204,6 +204,12 @@ def report_page():
 def confirm_page(token: str):
     """The page a sponsor or chair opens from their text. No sign-in; the token is the key."""
     return FileResponse(os.path.join(STATIC_DIR, "confirm.html"))
+
+
+@app.get("/log/{token}", include_in_schema=False)
+def shared_log_page(token: str):
+    """A participant's log, opened from the text they sent. No sign-in; the token is the key."""
+    return FileResponse(os.path.join(STATIC_DIR, "report.html"))
 
 
 @app.get("/sw.js", include_in_schema=False)
