@@ -96,11 +96,16 @@ class Settings:
     # is right for local development and wrong behind a proxy.
     PUBLIC_URL: str = os.environ.get("MC_PUBLIC_URL", "").rstrip("/")
 
+    # Older addresses whose pages forward to PUBLIC_URL, comma separated. The
+    # app moved from actionscountplus.com to app.actionscountplus.com; the bare
+    # domain forwards until it gets a homepage of its own.
+    REDIRECT_FROM: str = os.environ.get("MC_REDIRECT_FROM", "")
+
     # How long a confirmation link stays usable.
     CONFIRM_LINK_DAYS: int = int(os.environ.get("MC_CONFIRM_LINK_DAYS", "7"))
 
     # Self-serve profiles, paid through Stripe. Someone whose county is not
-    # on MeetingsCount creates their own profile at /join, proves the phone
+    # on ActionsCount+ creates their own profile at /join, proves the phone
     # is theirs with a code, and pays for a subscription on Stripe's hosted
     # checkout page. No card number ever reaches this app. MC_STRIPE_PRICE_ID
     # is the recurring price to sell (price_...), made in the Stripe
@@ -119,6 +124,10 @@ class Settings:
     @property
     def stripe_configured(self) -> bool:
         return self.PAYMENTS and bool(self.STRIPE_SECRET_KEY and self.STRIPE_PRICE_ID)
+
+    @property
+    def redirect_from(self) -> set[str]:
+        return {h.strip().lower() for h in self.REDIRECT_FROM.split(",") if h.strip()}
 
     @property
     def sms_configured(self) -> bool:

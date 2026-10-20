@@ -258,21 +258,24 @@ it suspends most of the time.
 
 ### The domain
 
-The preview answers at `https://actionscountplus.com`, registered at GoDaddy,
-which also runs its DNS. Two records on the bare domain point it at Fly, and
-`www` is a CNAME to the bare domain, so it follows:
+The app lives at `https://app.actionscountplus.com`. The bare domain is
+saved for a homepage of its own; until that exists, it and `www` forward
+every page to the app. GoDaddy holds the domain and runs its DNS:
 
 ```
-A     @   66.241.125.2
-AAAA  @   2a09:8280:1::19f:b0da:0
-CNAME www @
+CNAME app   mdn1rq1.meetingscount-preview.fly.dev
+A     @     66.241.125.2                 (until the homepage moves in)
+AAAA  @     2a09:8280:1::19f:b0da:0      (until the homepage moves in)
+CNAME www   @
 ```
 
-Fly holds a certificate for both names (`fly certs list`) and renews it on
-its own. `MC_PUBLIC_URL` in `fly.toml` is the address texts link to, and the
-app sends `www` on to it. After changing it, point Twilio's "A message comes
-in" webhook at the new address too. Until then the old address keeps
-working: webhooks are checked against both.
+Fly holds a certificate for each name (`fly certs list`) and renews it on
+its own. `MC_PUBLIC_URL` in `fly.toml` is the address texts link to, and
+`MC_REDIRECT_FROM` lists the addresses whose pages forward to it. Only pages
+forward: an API call never does, so a Twilio or Stripe webhook still pointed
+at an old address keeps working, and Twilio's signature is checked against
+both. When the homepage is ready, point `@` and `www` at wherever it is
+hosted, and take them out of `MC_REDIRECT_FROM`.
 
 ### Testing it on a phone
 

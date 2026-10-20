@@ -165,3 +165,17 @@ def test_www_goes_to_the_one_public_address(client, monkeypatch):
     assert r.status_code == 301 and r.headers["location"] == "https://app.example/officer?x=1"
     assert client.get("/healthz", headers={"host": "app.example"}).status_code == 200
     assert client.get("/healthz", headers={"host": "meetingscount-preview.fly.dev"}).status_code == 200
+
+
+def test_the_old_address_forwards_pages_but_never_api_calls(client, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "PUBLIC_URL", "https://app.example")
+    monkeypatch.setattr(settings, "REDIRECT_FROM", "example, www.example")
+    r = client.get("/log/abc?x=1", headers={"host": "example"}, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "https://app.example/log/abc?x=1"
+    assert client.get("/", headers={"host": "www.example"}, follow_redirects=False).status_code == 301
+    assert client.get("/api/auth/context", headers={"host": "example"}).status_code == 200
+    assert client.post("/api/sms/status", data={}, headers={"host": "example"}).status_code == 403, \
+        "a webhook reaches the app, and is turned away only for its signature"
+    assert client.get("/healthz", headers={"host": "example"}).status_code == 200
+    assert client.get("/officer", headers={"host": "app.example"}, follow_redirects=False).status_code == 200

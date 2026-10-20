@@ -157,11 +157,17 @@ async def cache_rules(request, call_next):
 @app.middleware("http")
 async def one_address(request, call_next):
     """
-    www.<domain> sends people on to <domain>, so a phone ends up with one
-    sign-in and one home-screen icon whichever way the address was typed.
+    Other addresses for the app send people on to MC_PUBLIC_URL, so a phone
+    ends up with one sign-in and one home-screen icon however the address
+    was typed, and an old link in a text still opens. www.<host> always, plus
+    whatever MC_REDIRECT_FROM lists. Pages only: an API call is never moved,
+    so a Twilio or Stripe webhook still pointed at an old address keeps working.
     """
     host = urlsplit(settings.PUBLIC_URL).hostname if settings.PUBLIC_URL else None
-    if host and request.method in ("GET", "HEAD") and request.url.hostname == f"www.{host}":
+    here = request.url.hostname
+    if (host and here != host and request.method in ("GET", "HEAD")
+            and (here == f"www.{host}" or here in settings.redirect_from)
+            and not request.url.path.startswith("/api/") and request.url.path != "/healthz"):
         query = f"?{request.url.query}" if request.url.query else ""
         return RedirectResponse(settings.PUBLIC_URL + request.url.path + query, status_code=301)
     return await call_next(request)
