@@ -41,7 +41,7 @@ class MeetingSpec:
     duration_min: int = 60
     radius_ft: float = DEFAULT_RADIUS_FT   # adjustable per meeting (urban areas)
     time_window_min: int = DEFAULT_TIME_WINDOW_MIN
-    category: str = "public"           # public | private | community_service | therapy
+    category: str = "public"           # public | private | support_group | community_service | therapy
 
 
 @dataclass

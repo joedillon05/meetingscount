@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import reviewing
+from .. import retention, reviewing
 from ..auth import audit, end_all_sessions, require, scope_to_county
 from ..config import settings
 from ..db import get_db
@@ -68,22 +68,12 @@ def audit_log(limit: int = 200, action: str | None = None, db: Session = Depends
 def run_retention(request: Request, db: Session = Depends(get_db),
                   user: User = Depends(require(Role.admin))):
     """
-    Drop raw coordinates older than the retention window. Distance, verdict and
-    reasons survive, so the compliance record is intact but the location history
-    is gone. In production a scheduled job calls this, not a person.
+    Drop raw coordinates older than the retention window, now rather than at
+    the next scheduled pass. Distance, verdict and reasons survive, so the
+    compliance record is intact but the location history is gone. The app
+    runs the same purge on its own; see app/retention.py.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.PIN_RETENTION_DAYS)
-    rows = db.scalars(select(CheckIn).where(
-        CheckIn.checked_in_at < cutoff, CheckIn.pin_purged_at.is_(None),
-        CheckIn.lat.is_not(None))).all()
-    for c in rows:
-        c.lat = c.lng = c.checkout_lat = c.checkout_lng = None
-        c.ip = None
-        c.pin_purged_at = datetime.now(timezone.utc)
-    db.commit()
-    audit(db, user, "run_retention", detail=f"purged {len(rows)} pins older than "
-          f"{settings.PIN_RETENTION_DAYS}d", request=request)
-    return {"purged": len(rows), "cutoff": cutoff.isoformat()}
+    return retention.purge_pins(db, by=user, detail="by hand from the dashboard")
 
 
 @router.get("/ops/checkins")

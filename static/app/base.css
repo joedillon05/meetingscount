@@ -3,6 +3,8 @@
    alone. Loaded after tokens.css, before a surface's own stylesheet. */
 
 * { box-sizing: border-box; }
+/* hidden means hidden, whatever display a class gave the element. */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);

@@ -10,8 +10,8 @@ import {
   $, $$, ago, dateTime, duration, esc, feet, icon, plural, shortDay, time, toast,
 } from './lib.js';
 
-const CATEGORY = { public: 'public meetings', community_service: 'community service',
-  private: 'private meetings', therapy: 'therapy', any: 'meetings' };
+const CATEGORY = { public: 'public meetings', private: 'private meetings', support_group: 'support group',
+  community_service: 'community service', therapy: 'therapy', any: 'meetings' };
 const DECISION = {
   approved: { label: 'Counted', tone: 'ok', icon: 'check', verb: 'Counted this check-in' },
   denied: { label: 'Not counted', tone: 'bad', icon: 'x', verb: 'Decided it does not count' },

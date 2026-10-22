@@ -86,8 +86,10 @@ class AreaIn(BaseModel):
 
 
 class ShareIn(BaseModel):
+    """Who gets the log: a name, and a mobile number or an email address."""
     name: str = Field(max_length=120)
-    phone: str = Field(max_length=32)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    email: Optional[str] = Field(default=None, max_length=200)
 
 
 class TestTextIn(BaseModel):
@@ -175,6 +177,7 @@ class SignupStartIn(BaseModel):
     email: Optional[str] = Field(default=None, max_length=200)
     per_week: int = Field(default=3, ge=1, le=14)       # what the order says
     starts_on: Optional[datetime] = None
+    ends_on: Optional[datetime] = None                  # when probation ends, if they know
 
 
 class SignupVerifyIn(BaseModel):

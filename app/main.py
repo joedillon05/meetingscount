@@ -19,6 +19,7 @@ The app refuses to start if either is on while MC_ENV=production.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import secrets
@@ -30,6 +31,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import retention
 from .config import settings
 from .db import create_all
 from .routers import (
@@ -57,7 +59,14 @@ async def lifespan(_app: FastAPI):
     # Dev convenience only. Production runs `alembic upgrade head` on deploy.
     if settings.DATABASE_URL.startswith("sqlite"):
         create_all()
-    yield
+    # The consent screen says exact locations are deleted after a set number
+    # of days. This is what makes that true without anyone remembering to
+    # press a button: a pass now, then every few hours while the app is up.
+    purge = asyncio.create_task(retention.loop())
+    try:
+        yield
+    finally:
+        purge.cancel()
 
 
 IS_PRODUCTION = os.environ.get("MC_ENV") == "production"

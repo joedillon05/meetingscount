@@ -1,14 +1,14 @@
 // The participant app: what someone under a court order opens on their phone.
 //
-// Three screens (Today, History, You) plus sheets for checking in, checking
-// out, and reading a result. The rules it follows come from the Big Picture
+// Four screens (Today, Meetings, History, You) plus sheets for checking in,
+// checking out, and reading a result. The rules it follows come from the Big Picture
 // doc: location is read once, at the tap; every result carries its reasons in
 // plain words; nothing recorded about the person is hidden from them.
 
 import {
-  $, bestPosition, dateTime, day, dayKey, devIdentity, duration, esc, feet,
-  greeting, icon, locationPermission, makeApi, minutesUntil, plural, relativeDay,
-  setTimeZone, sheet, time, toast, weekday, weekKey, weekLabel,
+  $, bestPosition, dateTime, day, dayKey, devIdentity, duration, esc, feet, fromZoned,
+  greeting, icon, locationPermission, longDate, makeApi, minutesUntil, plural, relativeDay,
+  setTimeZone, sheet, shortDay, time, toast, wallClock, weekday, weekKey, weekLabel,
 } from './lib.js';
 
 const identity = devIdentity('mc_act_participant');
@@ -18,22 +18,28 @@ const app = $('#app');
 const S = {
   ctx: {}, me: null, devUsers: null, meetings: [], mine: [], progress: null,
   tab: 'today', loaded: false, installPrompt: null,
-  expanded: new Set(), filter: '', places: null,      // the Today lists
+  expanded: new Set(), filter: '', places: null,      // the Meetings tab lists
+  near: null,                                         // what "Find meetings near me" found, and when
 };
+const TABS = ['today', 'meetings', 'history', 'you'];
 
 /* ---------- words ---------- */
 
 const CATEGORY = {
-  public: 'Public meeting', private: 'Private meeting',
-  community_service: 'Community service', therapy: 'Therapy',
+  public: 'Public meeting', private: 'Private meeting', support_group: 'Support group',
+  community_service: 'Volunteering', therapy: 'Therapy',
 };
 const REQ_NOUN = {
   public: ['public meeting', 'public meetings'],
+  support_group: ['support group', 'support groups'],
   community_service: ['community service session', 'community service sessions'],
   private: ['private meeting', 'private meetings'],
   therapy: ['therapy session', 'therapy sessions'],
   any: ['meeting', 'meetings'],
 };
+/* The kinds a participant can pick when adding a meeting, in Spencer's words. */
+const ADD_KINDS = [['public', 'Public meeting'], ['private', 'Private meeting'], ['support_group', 'Support group'],
+  ['therapy', 'Therapy'], ['community_service', 'Volunteering']];
 
 /* Where a check-in stands for the participant, folding in any review. */
 function standing(c) {
@@ -128,7 +134,7 @@ function enter() {
 function start() {
   if (S.started) { renderShell(); refresh(); return; }
   S.started = true;
-  S.tab = ['today', 'history', 'you'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'today';
+  S.tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'today';
   renderShell();
   refresh();
   setInterval(() => { if (!document.hidden) renderTab(); }, 30_000);   // times and windows move
@@ -136,7 +142,7 @@ function start() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   window.addEventListener('hashchange', () => {
     const t = location.hash.slice(1);
-    if (['today', 'history', 'you'].includes(t) && t !== S.tab) { S.tab = t; renderShell(); }
+    if (TABS.includes(t) && t !== S.tab) { S.tab = t; renderShell(); }
   });
 }
 
@@ -171,6 +177,7 @@ function renderShell() {
     <main id="view" tabindex="-1"></main>
     <nav class="tabs" aria-label="Sections">
       ${tabBtn('today', 'home', 'Today')}
+      ${tabBtn('meetings', 'map', 'Meetings')}
       ${tabBtn('history', 'list', 'History')}
       ${tabBtn('you', 'user', 'You')}
     </nav>`;
@@ -187,7 +194,7 @@ function renderTab() {
   const v = $('#view');
   if (!v) return;
   if (!S.loaded) { v.innerHTML = S.loadError ? errorCard(S.loadError) : skeleton(); return; }
-  v.innerHTML = { today: viewToday, history: viewHistory, you: viewYou }[S.tab]();
+  v.innerHTML = { today: viewToday, meetings: viewMeetings, history: viewHistory, you: viewYou }[S.tab]();
   if (S.tab === 'you') { loadPeople(); loadShares(); }
 }
 
@@ -234,11 +241,130 @@ function standingFor(meetingId) {
   return S.mine.find(c => c.meeting_id === meetingId && c.status !== 'rejected');
 }
 
-/* With the directory switched on, a town has hundreds of meetings a week.
+/* Today is for the person standing outside a meeting. One big button reads
+   the phone's location once and shows only what is within reach and about
+   to start, or already going. Everything else lives under Meetings. */
+const NEAR_FRESH_MS = 15 * 60e3;
+const NEAR_FT = 500;
+
+function viewToday() {
+  const now = Date.now();
+  const active = activeCheckIn(now);
+  return `<div class="stack">
+    <div class="hello">
+      <h1>${greeting()}, ${esc(firstName(S.me.name))}</h1>
+      <p class="muted">${esc(day(new Date()))}</p>
+    </div>
+
+    ${questionCards()}
+    ${active ? activeCard(active) : ''}
+    ${progressCard()}
+    ${nearSection(now, active)}
+
+    <button class="link-row add-row" data-act="personal" type="button">
+      ${icon('plus')}<span><b>Add a meeting that isn't listed</b><br>
+      <span class="muted small">One you're at now, or one coming up this week. It counts, marked as added by you.</span></span>${icon('arrow', 'muted')}
+    </button>
+    <p class="hint">Looking for a meeting later this week? <a href="#meetings">Browse all meetings</a></p>
+  </div>`;
+}
+
+/* The button, or what it found. A result goes stale after a quarter hour:
+   the person has moved on, or the meeting has. */
+function nearSection(now, active) {
+  const n = S.near;
+  if (!n || now - n.at > NEAR_FRESH_MS) {
+    return `<section aria-labelledby="h-near">
+      <h2 class="sec" id="h-near">Check in</h2>
+      <button class="btn block big near-btn" data-act="near" type="button">${icon('pin')} Find meetings near me</button>
+      <p class="hint">Shows meetings within ${NEAR_FT} feet of you that start within the hour. Your location is read once, when you tap, and not kept.</p>
+    </section>`;
+  }
+  const list = n.list.map(m => ({ ...m, state: liveState(m, now) }))
+    .filter(m => m.id !== active?.meeting_id && m.state !== 'ended');
+  return `<section aria-labelledby="h-near">
+    <div class="near-head"><h2 class="sec flush" id="h-near">Meetings where you are</h2>
+      <button class="linkish" data-act="near" type="button">Look again</button></div>
+    ${list.length ? list.map(meetingCard).join('') : `
+      <div class="card near-empty">${icon('pin', 'muted')}
+        <p><b>No listed meeting is within ${NEAR_FT} feet of you right now.</b> If you're at one, add it and check in. It counts.</p>
+        <button class="btn block" data-act="personal" type="button">${icon('plus')} Add the meeting I'm at</button>
+      </div>`}
+  </section>`;
+}
+
+/* One location read, one request, and the short list. The reading goes to
+   the server only as a search centre; nothing about it is stored. */
+async function findNear() {
+  const sh = sheet('', { label: 'Find meetings near me' });
+  if (!(await primeLocation(sh, {
+    title: 'Your location, once',
+    body: 'To find the meetings around you, ActionsCount+ reads your location one time, right now. Your phone will ask for permission. It is not kept, and it is never read in the background.',
+  }))) return;
+  const locating = acc => sh.set(`<div class="step" aria-live="polite">
+    <div class="pulse" aria-hidden="true">${icon('pin')}</div>
+    <h2>Finding your location</h2>
+    <p class="muted">${acc ? `Accurate to about ±${Math.round(acc)} m` : 'Keep this screen open. This takes a few seconds.'}</p></div>`);
+  locating();
+  let pos;
+  try {
+    pos = await bestPosition({ goodEnoughM: 60, settleMs: 4000, hardTimeoutMs: 15000, onProgress: locating });
+  } catch (e) {
+    sh.set(e.code === 1 ? locationHelp() : `<div class="step">
+      <div class="hero-ic warn">${icon('alert')}</div>
+      <h2>Could not get your location</h2>
+      <p>${e.code === 3 ? 'Your phone did not find a location in time. Step near a door or window, or outside, and try again.' : esc(e.message || 'Your phone could not share a location.')}</p>
+      <button class="btn block" data-retry type="button">Try again</button></div>`);
+    const retry = sh.body.querySelector('[data-retry]');
+    if (retry) retry.onclick = () => { sh.close(); findNear(); };
+    return;
+  }
+  sh.set(`<div class="step" aria-live="polite"><div class="pulse" aria-hidden="true">${icon('map')}</div>
+    <h2>Looking for meetings</h2><p class="muted">Within ${NEAR_FT} feet, starting within the hour.</p></div>`);
+  const now = Date.now();
+  const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+  const since = new Date(now - 4 * 3600e3).toISOString();
+  const until = new Date(now + 65 * 60e3).toISOString();
+  let rows;
+  try {
+    rows = await api(`/api/meetings?since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}` +
+                     `&lat=${lat}&lng=${lng}&within_mi=1`);
+  } catch (e) {
+    sh.set(`<div class="step"><div class="hero-ic warn">${icon('alert')}</div>
+      <h2>That did not go through</h2><p>${esc(e.message)}</p>
+      <button class="btn block" data-close type="button">OK</button></div>`);
+    return;
+  }
+  // Within the meeting's own circle, plus however fuzzy the fix was, so a
+  // poor signal indoors does not hide the room you are sitting in.
+  const slack = Math.min(accuracy || 0, 150) * 3.28084;
+  const list = rows.map(m => ({ ...m, feet: feetBetween(lat, lng, m), state: liveState(m, now) }))
+    .filter(m => (m.state === 'open' || m.state === 'late') && m.feet <= (m.radius_ft || NEAR_FT) + slack)
+    .sort((a, b) => a.feet - b.feet);
+  S.near = { at: now, list, lat, lng };
+  sh.close();
+  if (S.tab !== 'today') { location.hash = 'today'; } else renderTab();
+  if (!list.length) toast('No listed meeting is right here. You can add the one you are at.', { ms: 4000 });
+}
+
+function feetBetween(lat, lng, m) {
+  const R = 20_902_231, toR = x => x * Math.PI / 180;
+  const dLat = toR(m.lat - lat), dLng = toR(m.lng - lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(lat)) * Math.cos(toR(m.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/* A meeting by id, wherever the phone last saw it. */
+function findMeeting(id) {
+  return S.meetings.find(x => x.id === id) || S.near?.list.find(x => x.id === id);
+}
+
+/* ---------- Meetings: the whole list ----------
+   With the directory switched on, a town has hundreds of meetings a week.
    Each list shows a few and offers the rest, and a search box narrows them. */
 const SHOW_FIRST = 5;
 
-function viewToday() {
+function viewMeetings() {
   const now = Date.now();
   const active = activeCheckIn(now);
   const needle = (S.filter || '').trim().toLowerCase();
@@ -256,14 +382,7 @@ function viewToday() {
   later.forEach(m => (groups[dayKey(m.starts_at)] ||= []).push(m));
 
   return `<div class="stack">
-    <div class="hello">
-      <h1>${greeting()}, ${esc(firstName(S.me.name))}</h1>
-      <p class="muted">${esc(day(new Date()))}</p>
-    </div>
-
-    ${questionCards()}
-    ${active ? activeCard(active) : ''}
-    ${progressCard()}
+    <h1 class="page">Meetings</h1>
     ${areaBar()}
     ${S.meetings.length > 8 || needle ? `<div class="findbox">
       <input type="search" id="mfilter" placeholder="Find a meeting by name or street" value="${esc(S.filter || '')}" autocomplete="off" aria-label="Find a meeting">
@@ -285,9 +404,9 @@ function viewToday() {
         ${someOf(`day:${k}`, list)}`).join('')}
     </section>` : ''}
 
-    <button class="link-row" data-act="personal" type="button">
+    <button class="link-row add-row" data-act="personal" type="button">
       ${icon('plus')}<span><b>Add a meeting that isn't listed</b><br>
-      <span class="muted small">You're there now and it's not on the list. It counts, marked as added by you.</span></span>${icon('arrow', 'muted')}
+      <span class="muted small">One you're at now, or one coming up this week. It counts, marked as added by you.</span></span>${icon('arrow', 'muted')}
     </button>
   </div>`;
 }
@@ -321,13 +440,13 @@ function areaBar() {
       <button class="linkish" data-act="area" type="button">Change</button></div>`;
   }
   return `<button class="link-row" data-act="area" type="button">${icon('map')}
-    <span><b>Find meetings near you</b><br><span class="muted small">Pick your town once. Meetings within 25 miles of it show up here.</span></span>${icon('arrow', 'muted')}</button>`;
+    <span><b>Pick your town</b><br><span class="muted small">Once. Meetings within 25 miles of it show up here.</span></span>${icon('arrow', 'muted')}</button>`;
 }
 
 async function areaSheet() {
   const sh = sheet(`<div class="step left town">
     <h2>Where do you go to meetings?</h2>
-    <p class="muted">Pick a town. Meetings within 25 miles of it show on Today. Only the town is kept, never where your phone was.</p>
+    <p class="muted">Pick a town. Meetings within 25 miles of it show under Meetings. Only the town is kept, never where your phone was.</p>
     <input type="search" id="placeq" placeholder="Town or city" autocomplete="off" aria-label="Town">
     <ul class="pick places" id="places"><li class="muted small">Loading</li></ul>
     <button class="btn secondary block" data-locate type="button">${icon('pin')} Use my location once</button>
@@ -486,7 +605,8 @@ function meetingCard(m) {
       <div class="m-main">
         <h4>${esc(m.name)}</h4>
         <p class="muted small">${esc(CATEGORY[m.category] || m.category)}${m.added ? ' · <span class="tag">Added by you</span>' : ''}${
-          m.miles != null ? ` · ${m.miles < 1 ? 'under a mile' : `${Math.round(m.miles)} mi`} away` : ''}</p>
+          m.feet != null ? ` · <span class="m-dist">${feet(m.feet)} away</span>`
+          : m.miles != null ? ` · ${m.miles < 1 ? 'under a mile' : `${Math.round(m.miles)} mi`} away` : ''}</p>
         ${m.address ? `<a class="addr small" href="${mapsUrl(m)}" target="_blank" rel="noopener">${icon('directions')} ${esc(m.address)}</a>` : ''}
       </div>
     </div>
@@ -503,7 +623,7 @@ function mapsUrl(m) {
 /* ---------- checking in ---------- */
 
 async function checkIn(meetingId, { late = false } = {}) {
-  const m = S.meetings.find(x => x.id === meetingId);
+  const m = findMeeting(meetingId);
   if (!m) return;
   const sh = sheet('', { label: 'Check in' });
 
@@ -518,7 +638,7 @@ async function checkIn(meetingId, { late = false } = {}) {
 }
 
 /* Before the browser's own prompt, say what we are about to do and why. */
-async function primeLocation(sh) {
+async function primeLocation(sh, words = {}) {
   const state = await locationPermission();
   if (state === 'granted') return true;
   if (state === 'denied') { sh.set(locationHelp()); return false; }
@@ -527,8 +647,8 @@ async function primeLocation(sh) {
   if (primed && state !== 'prompt') return true;
   const ok = await confirmStep(sh, {
     icon: 'pin',
-    title: 'Your location, once',
-    body: 'To confirm you are at the meeting, ActionsCount+ reads your location one time, right now. Your phone will ask for permission. It is never read in the background.',
+    title: words.title || 'Your location, once',
+    body: words.body || 'To confirm you are at the meeting, ActionsCount+ reads your location one time, right now. Your phone will ask for permission. It is never read in the background.',
     yes: 'Continue', no: 'Not now',
   });
   try { localStorage.setItem('mc_loc_primed', '1'); } catch { /* ignore */ }
@@ -927,35 +1047,60 @@ async function loadShares() {
   let shares = [];
   try { shares = await api('/api/my/shares'); } catch { ul.innerHTML = '<li class="muted small">Could not load who has your log.</li>'; return; }
   ul.innerHTML = shares.map(s => `<li><span class="who"><b>${esc(s.name)}</b>
-      <span class="muted small">${esc(s.phone)} · ${s.last_opened_at ? `opened ${esc(relativeDay(s.last_opened_at).toLowerCase())}` : 'not opened yet'}</span></span>
+      <span class="muted small">${esc(s.via === 'email' ? s.email : s.phone)} · ${s.last_opened_at ? `opened ${esc(relativeDay(s.last_opened_at).toLowerCase())}` : 'not opened yet'}</span></span>
       <button class="linkish small" data-act="stopshare" data-id="${s.id}" type="button">Stop sharing</button></li>`).join('');
 }
 
+const canText = () => !!(S.ctx.texting || S.ctx.demo);
+const canEmail = () => !!(S.ctx.emailing || S.ctx.demo);
+const canShare = () => canText() || canEmail();
+
 function shareSheet() {
+  const ways = [canText() && ['text', 'Text'], canEmail() && ['email', 'Email']].filter(Boolean);
+  let via = ways[0][0];
   const sh = sheet(`<form class="step left ask-form" id="shareLog">
     <h2>Send my log</h2>
-    <p class="muted">They get one text with a link to your log. It always shows your latest check-ins, until you stop sharing.</p>
+    <p class="muted">They get one message with a link to your log. It always shows your latest check-ins, until you stop sharing.</p>
+    ${ways.length > 1 ? `<label>Send it by</label><div class="seg" role="tablist">${ways.map(([v, l]) =>
+      `<button type="button" role="tab" data-via="${v}" class="${v === via ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
     <label for="sl-name">Their name</label>
     <input id="sl-name" maxlength="80" autocomplete="off" placeholder="Sam" required>
-    <label for="sl-phone">Their mobile number</label>
-    <input id="sl-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="(734) 555-0142" required>
+    <div data-field="text"><label for="sl-phone">Their mobile number</label>
+    <input id="sl-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="(734) 555-0142"></div>
+    <div data-field="email"><label for="sl-email">Their email address</label>
+    <input id="sl-email" type="email" inputmode="email" autocomplete="off" placeholder="name@example.com"></div>
+    <p class="err" id="sl-err" role="alert" hidden></p>
     <button class="btn block" type="submit">Send</button>
   </form>`, { label: 'Send my log' });
-  sh.body.querySelector('#sl-name').focus();
-  sh.body.querySelector('#shareLog').onsubmit = async e => {
+  const body = sh.body;
+  const show = () => {
+    body.querySelectorAll('[data-field]').forEach(d => { d.hidden = d.dataset.field !== via; });
+    body.querySelectorAll('[data-via]').forEach(b => b.classList.toggle('on', b.dataset.via === via));
+  };
+  show();
+  body.querySelectorAll('[data-via]').forEach(b => { b.onclick = () => { via = b.dataset.via; show(); }; });
+  body.querySelector('#sl-name').focus();
+  body.querySelector('#shareLog').onsubmit = async e => {
     e.preventDefault();
-    const f = e.target, b = f.querySelector('button');
+    const f = e.target, b = f.querySelector('button[type="submit"]'), err = f.querySelector('#sl-err');
+    const name = f.querySelector('#sl-name').value.trim();
+    const phone = f.querySelector('#sl-phone').value.trim(), email = f.querySelector('#sl-email').value.trim();
+    err.hidden = true;
+    if (name.length < 2) { err.textContent = 'Give their name, so you know who has your log.'; err.hidden = false; return; }
+    if (via === 'text' && phone.replace(/\D/g, '').length < 10) { err.textContent = 'Enter their mobile number, with the area code.'; err.hidden = false; return; }
+    if (via === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { err.textContent = 'Enter their email address.'; err.hidden = false; return; }
     b.disabled = true;
     let r;
     try {
-      r = await api('/api/my/shares', { method: 'POST', body: JSON.stringify({
-        name: f.querySelector('#sl-name').value.trim(), phone: f.querySelector('#sl-phone').value.trim() }) });
-    } catch (err) { b.disabled = false; toast(err.message); return; }
+      r = await api('/api/my/shares', { method: 'POST', body: JSON.stringify(
+        via === 'text' ? { name, phone } : { name, email }) });
+    } catch (ex) { b.disabled = false; err.textContent = ex.message; err.hidden = false; return; }
     const who = esc(firstName(r.name));
+    const how = via === 'text' ? 'text' : 'email';
     sh.set(`<div class="step"><div class="hero-ic tone-ok">${icon('inbox')}</div>
-      <h2>${r.sent ? `We texted ${who}` : `Your log is ready for ${who}`}</h2>
-      <p>${r.sent ? 'The link in their text shows your log as it stands whenever they open it.' : 'This system is not sending texts yet.'} You can stop sharing any time from this page.</p>
-      ${r.demo_link ? `<p class="callout ok small">${icon('note')}<span>Demo: the text to ${who} would carry this link.<br>
+      <h2>${r.sent ? `We ${via === 'text' ? 'texted' : 'emailed'} ${who}` : `Your log is ready for ${who}`}</h2>
+      <p>${r.sent ? `The link in their ${how} shows your log as it stands whenever they open it.` : `This system is not sending ${how}s yet.`} You can stop sharing any time from this page.</p>
+      ${r.demo_link ? `<p class="callout ok small">${icon('note')}<span>Demo: the ${how} to ${who} would carry this link.<br>
         <a href="${esc(r.demo_link)}" target="_blank" rel="noopener">Open it as ${who}</a></span></p>` : ''}
       <button class="btn block" data-close type="button">Done</button></div>`);
     loadShares();
@@ -970,39 +1115,154 @@ async function stopSharing(id) {
 /* ---------- meetings a participant adds ---------- */
 
 function personalMeeting() {
-  const sh = sheet(`<form class="step left" id="pm">
+  const now = new Date();
+  const days = [];
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now.getTime() + i * 864e5);
+    days.push([dayKey(d), i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : shortDay(d)]);
+  }
+  const round5 = t => { const [h, m] = t.split(':').map(Number); return `${String(h).padStart(2, '0')}:${String(m - m % 5).padStart(2, '0')}`; };
+  let when = 'now', spot = null, map = null, marker = null;
+
+  const sh = sheet(`<form class="step left" id="pm" novalidate>
     <h2>Add a meeting that isn't listed</h2>
-    <p class="muted">For a meeting you're at right now that isn't on the list. It starts now, where you are.</p>
-    <p class="callout">${icon('eye')} It counts toward your requirement. Your log marks it as added by you, with where your phone was, so whoever reads it can tell.</p>
+    <p class="muted">It counts toward your requirement. Your log marks it as added by you, with where it is, so whoever reads it can tell.</p>
+    <label>When</label>
+    <div class="seg" role="tablist">
+      <button type="button" role="tab" data-when="now" class="on">I'm there now</button>
+      <button type="button" role="tab" data-when="later">Later this week</button>
+    </div>
     <label for="pm-name">What is it?</label>
     <input id="pm-name" required maxlength="120" placeholder="For example: Tuesday night AA" autocomplete="off">
-    <label for="pm-where">Where is it?</label>
-    <input id="pm-where" required maxlength="200" placeholder="For example: St. Mary's Church, 123 Main St" autocomplete="off">
     <div class="two">
       <div><label for="pm-cat">Type</label>
-        <select id="pm-cat"><option value="public">Recovery meeting</option><option value="private">Support group</option>
-        <option value="therapy">Therapy</option><option value="community_service">Volunteering</option></select></div>
+        <select id="pm-cat">${ADD_KINDS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
       <div><label for="pm-len">Length</label>
-        <select id="pm-len"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div>
+        <select id="pm-len"><option value="30">30 min</option><option value="60" selected>1 hour</option>
+        <option value="90">1 h 30 min</option><option value="120">2 hours</option></select></div>
     </div>
-    <button class="btn block" type="submit">Start and check in</button>
+    <div class="two" data-later hidden>
+      <div><label for="pm-day">Day</label>
+        <select id="pm-day">${days.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+      <div><label for="pm-time">Start time</label>
+        <input id="pm-time" type="time" value="${round5(wallClock(now))}" step="300"></div>
+    </div>
+    <p class="ends-at" id="pm-ends"></p>
+    <label for="pm-where">Where is it? <span class="muted" data-later hidden>optional if you mark the map</span></label>
+    <input id="pm-where" maxlength="200" placeholder="For example: St. Mary's Church, 123 Main St" autocomplete="off">
+    <div class="spot" data-later hidden>
+      <p class="map-note">Tap the map where the meeting is. If you don't know the address, the pin is enough.</p>
+      <div class="map-box" id="pm-map"></div>
+      <button class="btn secondary block" type="button" data-locate>${icon('pin')} Center the map on me</button>
+    </div>
+    <p class="callout" id="pm-note"></p>
+    <p class="err" id="pm-err" role="alert" hidden></p>
+    <button class="btn block" type="submit" id="pm-go">Start and check in</button>
   </form>`, { label: 'Add a meeting that isn\'t listed' });
-  sh.body.querySelector('#pm-name').focus();
-  sh.body.querySelector('#pm').onsubmit = async e => {
-    e.preventDefault();
-    const name = sh.body.querySelector('#pm-name').value.trim();
-    const address = sh.body.querySelector('#pm-where').value.trim();
-    const category = sh.body.querySelector('#pm-cat').value;
-    const duration_min = Number(sh.body.querySelector('#pm-len').value);
-    if (!(await primeLocation(sh))) return;
-    const draft = { id: 0, name, opens_at: new Date().toISOString() };
-    await runCheckIn(sh, draft, async ({ lat, lng, accuracy_m }) => {
-      const m = await api('/api/meetings', { method: 'POST', body: JSON.stringify({
-        name, category, address, lat, lng, duration_min, starts_at: new Date().toISOString() }) });
-      return api('/api/checkins', { method: 'POST',
-        body: JSON.stringify({ meeting_id: m.id, lat, lng, accuracy_m }) });
-    });
+  const body = sh.body;
+  const q = sel => body.querySelector(sel);
+  const fail = msg => { const e = q('#pm-err'); e.textContent = msg; e.hidden = false; };
+
+  const startsAt = () => when === 'now' ? new Date() : fromZoned(q('#pm-day').value, q('#pm-time').value || '00:00');
+  const redraw = () => {
+    body.querySelectorAll('[data-later]').forEach(el => { el.hidden = when !== 'later'; });
+    body.querySelectorAll('[data-when]').forEach(b => b.classList.toggle('on', b.dataset.when === when));
+    const len = Number(q('#pm-len').value);
+    const ends = new Date(startsAt().getTime() + len * 60e3);
+    q('#pm-ends').textContent = when === 'now' ? `Starts now, ends at ${time(ends)}.`
+      : `${esc(relativeDay(startsAt()))} ${time(startsAt())} to ${time(ends)}.`;
+    q('#pm-note').innerHTML = when === 'now'
+      ? `${icon('eye')} It starts now, where you are. Your phone's location is read once and becomes the meeting's spot.`
+      : `${icon('calendar')} It shows under Meetings, and on Today when it's time. Check in when you get there, the same as any other meeting.`;
+    q('#pm-go').textContent = when === 'now' ? 'Start and check in' : 'Add this meeting';
+    q('#pm-err').hidden = true;
+    if (when === 'later' && !map) showMap();
+    if (map) setTimeout(() => map.invalidateSize(), 50);
   };
+  body.querySelectorAll('[data-when]').forEach(b => { b.onclick = () => { when = b.dataset.when; redraw(); }; });
+  ['#pm-len', '#pm-day', '#pm-time'].forEach(sel => { q(sel).oninput = redraw; });
+  redraw();
+  q('#pm-name').focus();
+
+  async function showMap() {
+    let L;
+    try { L = await loadLeaflet(); } catch (e) { q('.map-note').textContent = e.message; return; }
+    if (!q('#pm-map') || map) return;
+    const centre = S.near ? [S.near.lat, S.near.lng] : S.me.area ? [S.me.area.lat, S.me.area.lng] : [42.28, -83.74];
+    map = L.map('pm-map', { scrollWheelZoom: false, tap: true }).setView(centre, S.near ? 15 : S.me.area ? 12 : 9);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    const place = ll => {
+      spot = { lat: ll.lat, lng: ll.lng };
+      if (marker) marker.setLatLng(ll); else marker = L.marker(ll).addTo(map);
+      q('.map-note').textContent = 'Pin placed. Drag the map and tap again to move it.';
+    };
+    map.on('click', e => place(e.latlng));
+    q('[data-locate]').onclick = async e => {
+      const b = e.currentTarget;
+      b.disabled = true; b.textContent = 'Finding your location';
+      try {
+        const pos = await bestPosition({ goodEnoughM: 100, settleMs: 3000, hardTimeoutMs: 12000 });
+        map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+      } catch { toast('Could not read your location. Drag the map instead.'); }
+      b.disabled = false; b.innerHTML = `${icon('pin')} Center the map on me`;
+    };
+  }
+
+  q('#pm').onsubmit = async e => {
+    e.preventDefault();
+    const name = q('#pm-name').value.trim();
+    const address = q('#pm-where').value.trim();
+    const category = q('#pm-cat').value;
+    const duration_min = Number(q('#pm-len').value);
+    if (name.length < 2) return fail('Say what the meeting is.');
+
+    if (when === 'now') {
+      if (!address) return fail('Say where it is, so whoever reads your log knows.');
+      if (!(await primeLocation(sh))) return;
+      const draft = { id: 0, name, opens_at: new Date().toISOString() };
+      await runCheckIn(sh, draft, async ({ lat, lng, accuracy_m }) => {
+        const m = await api('/api/meetings', { method: 'POST', body: JSON.stringify({
+          name, category, address, lat, lng, duration_min, starts_at: new Date().toISOString() }) });
+        return api('/api/checkins', { method: 'POST',
+          body: JSON.stringify({ meeting_id: m.id, lat, lng, accuracy_m }) });
+      });
+      return;
+    }
+
+    if (!spot) return fail('Tap the map where the meeting is.');
+    const starts = startsAt();
+    if (starts.getTime() < Date.now() - 60 * 60e3) return fail('That time has already passed. Pick a later one, or choose "I\'m there now".');
+    const go = q('#pm-go');
+    go.disabled = true; go.textContent = 'Adding';
+    try {
+      await api('/api/meetings', { method: 'POST', body: JSON.stringify({
+        name, category, address: address || 'Marked on the map', lat: spot.lat, lng: spot.lng, duration_min,
+        starts_at: starts.toISOString() }) });
+    } catch (ex) {
+      go.disabled = false; go.textContent = 'Add this meeting';
+      return fail(ex.message);
+    }
+    sh.set(`<div class="step"><div class="hero-ic tone-ok">${icon('check')}</div>
+      <h2>Added</h2>
+      <p>${esc(name)} is on your list for ${esc(relativeDay(starts).toLowerCase())} at ${time(starts)}. When you get there, tap <b>Find meetings near me</b> and check in.</p>
+      <button class="btn block" data-close type="button">Done</button></div>`);
+    refresh();
+  };
+}
+
+/* Leaflet is only needed to place a pin, so it loads the first time someone does. */
+let leafletLoading = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  leafletLoading ||= new Promise((resolve, reject) => {
+    const css = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/static/vendor/leaflet/leaflet.css' });
+    document.head.appendChild(css);
+    const js = Object.assign(document.createElement('script'), { src: '/static/vendor/leaflet/leaflet.js' });
+    js.onload = () => resolve(window.L);
+    js.onerror = () => { leafletLoading = null; reject(new Error('The map could not load. Type the address instead.')); };
+    document.head.appendChild(js);
+  });
+  return leafletLoading;
 }
 
 /* ---------- History ---------- */
@@ -1130,6 +1390,7 @@ function viewYou() {
         ${me.program ? `<dt>Program</dt><dd>${esc(me.program)}</dd>` : ''}
         ${me.officer ? `<dt>Officer</dt><dd>${esc(me.officer)}</dd>` : ''}
         ${me.county ? `<dt>County</dt><dd>${esc(me.county)}</dd>` : ''}
+        ${me.ends_on ? `<dt>Probation ends</dt><dd>${esc(longDate(me.ends_on))}</dd>` : ''}
       </dl>
     </section>
 
@@ -1138,10 +1399,10 @@ function viewYou() {
     <section class="card" aria-labelledby="h-priv">
       <h2 class="sec flush" id="h-priv">${icon('shield')} Your privacy</h2>
       <ul class="plain">
-        <li>Your location is read only when you tap check in or check out. Never in the background.</li>
+        <li>Your location is read only when you tap: to find meetings near you, or to check in or out. Never in the background. Finding meetings keeps nothing.</li>
         <li>Your officer sees whether each check-in was confirmed, not a map of where you go.</li>
         <li>Exact locations are deleted after ${pol.pin_retention_days} days. Results stay with your case for up to ${plural(years, 'year')}.</li>
-        <li>A meeting you add counts, and shows on your log as added by you, with where your phone was.</li>
+        <li>A meeting you add counts, and shows on your log as added by you, with where it is.</li>
         <li>Your log goes to someone else only when you send it, and you can stop sharing any time.</li>
         <li>You can add a note to any result, and a person reviews anything unclear.</li>
       </ul>
@@ -1157,10 +1418,10 @@ function viewYou() {
 
     <section class="card" aria-labelledby="h-log">
       <h2 class="sec flush" id="h-log">${icon('list')} Your log</h2>
-      <p class="small muted">Every check-in and what it counted for, ready to print or save as a PDF.${canAsk()
-        ? ' Send it to anyone who needs to see it: an officer, a lawyer, someone at home keeping track. They get a text with a link that always shows your latest log.' : ''}</p>
+      <p class="small muted">Every check-in and what it counted for, ready to print or save as a PDF.${canShare()
+        ? ` Send it to anyone who needs to see it: an officer, a lawyer, someone at home keeping track. They get a ${canText() && canEmail() ? 'text or an email' : canEmail() ? 'email' : 'text'} with a link that always shows your latest log.` : ''}</p>
       <a class="btn block" href="/report?mine=1">${icon('file')} Open my log</a>
-      ${canAsk() ? `<ul class="plain people-list" id="shareList"></ul>
+      ${canShare() ? `<ul class="plain people-list" id="shareList"></ul>
       <button class="btn secondary block" data-act="sharelog" type="button">${icon('inbox')} Send my log</button>` : ''}
     </section>
 
@@ -1183,16 +1444,41 @@ function viewYou() {
 }
 
 async function exportRecord() {
+  let blob, name;
   try {
-    const r = await fetch('/api/my/export', { headers: { 'X-MC-User': identity.get() } });
+    const r = await fetch('/api/my/export', { headers: identity.get() ? { 'X-MC-User': identity.get() } : {} });
     if (!r.ok) throw new Error('Could not prepare your record. Try again.');
-    const blob = await r.blob();
-    const name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'actionscount-record.json';
+    blob = await r.blob();
+    name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'actionscount-record.json';
+  } catch (e) { toast(e.message); return; }
+
+  // On a phone, and in the app added to the home screen, a download link
+  // often does nothing. The share sheet works everywhere: save to Files,
+  // AirDrop, email it to yourself.
+  const file = new File([blob], name, { type: 'application/json' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'My ActionsCount+ record' });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;             // they closed the sheet
+    }
+  }
+  try {
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     toast('Your record is downloading.');
-  } catch (e) { toast(e.message); }
+  } catch {
+    const text = await blob.text();
+    const sh = sheet(`<div class="step left"><h2>Your record</h2>
+      <p class="muted">Your browser could not save the file. Copy it instead.</p>
+      <textarea readonly rows="8" id="rec">${esc(text)}</textarea>
+      <button class="btn block" type="button" data-copy>Copy</button></div>`, { label: 'Your record' });
+    sh.body.querySelector('[data-copy]').onclick = async () => {
+      try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { sh.body.querySelector('#rec').select(); }
+    };
+  }
 }
 
 async function install() {
@@ -1236,7 +1522,7 @@ function renderConsent() {
     <p class="lead">Here is exactly what this app records and who sees it. It takes a minute to read.</p>
     <ol class="promises">
       <li>${icon('pin')}<div><b>Your location, only when you tap</b>
-        <p>We read your phone's location once, when you check in or out. Never in the background, never between meetings.</p></div></li>
+        <p>We read your phone's location once, when you tap to find meetings near you or to check in or out. Never in the background. Finding meetings keeps nothing; a check-in keeps the reading for ${pol.pin_retention_days} days.</p></div></li>
       <li>${icon('eye')}<div><b>${esc(officer)} sees results, not a map</b>
         <p>They see whether each check-in was confirmed. Your exact location is shown to them only if a check-in needs a closer look.</p></div></li>
       <li>${icon('trash')}<div><b>Deleted on a schedule</b>
@@ -1246,7 +1532,7 @@ function renderConsent() {
       <li>${icon('inbox')}<div><b>Texts, only about your check-ins</b>
         <p>A sign-in code when you ask for one, and a text when someone you chose confirms you were at a meeting. Reply STOP to any of them to stop.</p></div></li>
       <li>${icon('list')}<div><b>Meetings you add, and your log</b>
-        <p>A meeting that isn't on the list can be added where you are. It counts, and your log marks it as added by you, with where your phone was. Your log goes to anyone else only if you send it, and you can stop sharing any time.</p></div></li>
+        <p>A meeting that isn't on the list can be added, for now or for later this week. It counts, and your log marks it as added by you, with where it is. Your log goes to anyone else only if you send it, by text or email, and you can stop sharing any time.</p></div></li>
     </ol>
     <button class="btn block big" id="agree" type="button">I understand, continue</button>
     <p class="fine center">You can reread this any time under <b>You</b>. ${S.devUsers ? `<button class="linkish" data-act="switch" type="button">Demo: switch participant</button>` : ''}</p>
@@ -1330,7 +1616,11 @@ function renderSignIn(phone = '') {
       <button class="btn block big" type="submit">Continue</button>
     </form>
     <p class="fine center">Trouble signing in? Your officer can read you a code.</p>
-    ${S.ctx.self_signup ? `<p class="fine center">No profile yet? <a href="/join">Create one</a></p>` : ''}
+    ${S.ctx.self_signup ? `<div class="create">
+      <p>No profile yet?</p>
+      <a class="btn block big secondary" href="/join">${icon('plus')} Create your profile</a>
+      <p class="fine">For people whose court or program requires ActionsCount+, and for anyone keeping track of their own meetings.</p>
+    </div>` : ''}
   </main>`;
   const input = $('#phone');
   input.focus();
@@ -1426,6 +1716,7 @@ app.addEventListener('click', e => {
     checkout: () => checkOut(id),
     detail: () => detail(id),
     personal: personalMeeting,
+    near: findNear,
     ask: () => { document.querySelector('dialog[open]')?.close(); askSheet(id); },
     area: areaSheet,
     more: () => { S.expanded.add(t.dataset.key); renderTab(); },

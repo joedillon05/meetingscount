@@ -87,6 +87,42 @@ someone says a text never came.
 Expect about a cent per message segment and a few dollars a month for the
 number, at Twilio's current prices. A confirmation ask is two segments.
 
+## Email, through SendGrid
+
+A participant can send their log by email as well as by text. Email goes
+through SendGrid, which is Twilio's email service, so it lives in the same
+Twilio account. Until the two settings below are set, the email option does
+not show in the app (demo mode shows the link on screen instead).
+
+In the SendGrid console:
+
+1. **Settings → Sender Authentication.** Either verify the one address
+   (Single Sender Verification: a confirmation email to
+   `attendance@actionscountplus.com`, click the link) or, better,
+   **Authenticate Your Domain** for `actionscountplus.com`: SendGrid gives
+   you three CNAME records to add at GoDaddy, and after that mail from any
+   address at the domain passes the spam checks that a single sender does
+   not always pass.
+2. **Settings → API Keys → Create API Key.** Restricted access, with
+   **Mail Send** only. Copy it: it is shown once.
+
+Then, one line each, never in a file or in chat:
+
+```bash
+fly secrets set MC_SENDGRID_API_KEY=SG....
+```
+
+```bash
+fly secrets set MC_EMAIL_FROM=attendance@actionscountplus.com
+```
+
+`MC_EMAIL_FROM_NAME` is the name beside the address and defaults to
+ActionsCount+. Every email sent lands in the `email_log` table with
+SendGrid's answer: subject and status, never the body. SendGrid's free plan
+sends 100 emails a day, which is far more than log shares need; click and
+open tracking are switched off in every message so the one link in it is
+never rewritten.
+
 ## Payments, through Stripe
 
 `/join` lets someone create their own profile and pay for it. Until the
@@ -143,6 +179,17 @@ fly secrets set MC_STRIPE_PRICE_ID=price_...
 People already subscribed stay on the price they signed up at. Archive the
 old price in Stripe once nobody new should get it.
 
+### What the Stripe page looks like
+
+Checkout and the billing portal are Stripe's pages, and what they show at
+the top comes from the Stripe dashboard, not from this app. To take an old
+logo or name off them: **Settings → Business → Branding** for the icon, the
+logo and the colours (the app's icon is `static/icons/icon-512.png`);
+**Settings → Business → Business details** for the public business name that
+appears on the page and on receipts; and **Product catalog** for the product
+name beside the price. Changing those changes every future checkout; no
+deploy is needed.
+
 ### Promotion codes
 
 A free year for a demo, or any discount, is a Stripe coupon with a
@@ -194,9 +241,10 @@ fly ssh console -C "python tools/import_people.py /data/people.csv"
 That only shows what would happen. Add `--yes` to make the profiles. Add
 `--covered` if these people already paid on the old site, so no payment is
 asked of them, and `--text` to text each one that their account is ready,
-with the link. A number that already has an account is left alone, so the
-same list can be run again. Delete the file from `/data` afterwards: it is
-a list of names and phone numbers.
+with the link. A probation end date column is used when the sheet has one.
+A number that already has an account is left alone, so the same list can be
+run again. Delete the file from `/data` afterwards: it is a list of names
+and phone numbers.
 
 ## The meeting directory
 

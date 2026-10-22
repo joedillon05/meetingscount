@@ -12,6 +12,8 @@
 .join form { display: grid; gap: 8px; margin-top: 6px; }
 .join label { font-size: 14px; font-weight: 650; color: var(--ink-2); margin-top: 6px; }
 .join label .muted { font-weight: 500; }
+.join .callout.note { margin: 14px 0 6px; background: var(--brand-tint); color: var(--ink-2); line-height: 1.4; }
+.join .callout.note .ic { color: var(--brand); }
 .join .btn { margin-top: 10px; }
 .join .btn + .btn { margin-top: 0; }
 .join .err { color: var(--bad); font-weight: 600; font-size: 14px; }

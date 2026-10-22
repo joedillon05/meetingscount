@@ -264,7 +264,7 @@ code today:
 | Every staff view of a record is logged | `auth.audit()`, called by every caseload and detail route |
 | Least privilege | `auth.require(*roles)` on every staff route |
 | Tenant isolation | `auth.scope_to_county()` plus Postgres row-level security in migration `002_rls` |
-| Raw pins expire | `POST /api/retention/run` nulls coordinates past `MC_PIN_RETENTION_DAYS`, keeping the verdict |
+| Raw pins expire | `app/retention.py` nulls coordinates past `MC_PIN_RETENTION_DAYS` on its own, at start and every six hours, keeping the verdict; `POST /api/retention/run` does it now |
 | Reports never assert absence | `routers/reports.py`: "could not verify", never "did not attend" |
 | Explainable | every verdict stores its reasons; they appear in the UI and in the report |
 | Consent before the first check-in | `routers/me.py` records who agreed to which wording; `checkins.require_consent` refuses a check-in without it |

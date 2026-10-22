@@ -40,7 +40,7 @@ affects anyone's compliance. The court sees outcomes; it does not get a map.
 | Told plainly | A consent screen before the first check-in, recorded with a version. Check-in is refused without it | `app/routers/me.py`, `app/routers/checkins.require_consent` |
 | Outcomes, not maps | The caseload, the participant record and the review list carry no coordinates. One check-in's coordinates appear only in its review view, and that view writes an audit row | `app/schemas.checkin_out`, `app/routers/reviews.py` |
 | Bulk location | One endpoint, admin only, county scoped, audited every time | `app/routers/admin.ops_checkins` |
-| Retention | Coordinates older than the window are deleted, keeping the result and the reasons | `POST /api/retention/run`, `MC_PIN_RETENTION_DAYS` |
+| Retention | Coordinates older than the window are deleted on a schedule, keeping the result and the reasons | `app/retention.py` runs at start and every 6 hours; `POST /api/retention/run` for now; `MC_PIN_RETENTION_DAYS` |
 | Private by default | Meetings a participant records for themselves are visible only to them: not in staff lists, the review queue, reports, or the ops map | `app/routers/meetings.py`, `reviews.py`, `reports.py` |
 | Their own copy | A participant can see every result and reason about them, add a note to any of it, and download the lot as a file | `GET /api/my/export` |
 | Caching | Every API response is `no-store`, so no browser or proxy keeps personal data | `app/main.cache_rules` |
@@ -87,8 +87,11 @@ it is hidden from a reviewer.
    (migration 002) but the app connects as the owner and does not set
    `app.county_id` per request. Application scoping is what is enforcing
    tenancy today.
-3. **Retention runs on demand, not on a schedule.** The job exists and is
-   audited; nothing calls it nightly yet.
+3. **Retention runs inside the app, not as a separate job.** `app/retention.py`
+   purges at start and every six hours while the machine is awake, and
+   writes an audit row each time it removes anything. On Fly the machine
+   suspends when idle, so a quiet site purges when the next person opens
+   it. That keeps the 30-day promise within hours, not to the minute.
 4. **Texting needs a registered number.** The code is wired to Twilio, but a
    toll-free number has to pass verification (or a local number A2P
    registration) before carriers deliver at volume. Until then an officer

@@ -1,5 +1,5 @@
 """
-A participant's own log, and sharing it by text.
+A participant's own log, and sharing it by text or email.
 
 The log is the same attendance report an officer prints, built from the same
 code, so the two can never disagree. A participant can open it, print it,
@@ -11,6 +11,7 @@ participant stops sharing.
 Rules on sharing:
   - only the participant shares their own log
   - never to their own number, never to a number that has said stop
+  - by text or by email, one or the other for each person
   - at most ten people at a time, and five new shares a day
 """
 from __future__ import annotations
@@ -21,7 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import confirming, sms
+from .. import confirming, mail, sms
 from ..auth import audit, current_user
 from ..config import settings
 from ..db import SessionLocal, get_db
@@ -56,8 +57,10 @@ def _log(db: Session, p: Participant) -> dict:
 
 
 def _share_out(s: LogShare) -> dict:
-    return {"id": s.id, "name": s.name, "phone": sms.mask(s.phone), "active": s.active,
-            "created_at": s.created_at.isoformat(),
+    return {"id": s.id, "name": s.name, "via": s.via,
+            "phone": sms.mask(s.phone) if s.phone else None,
+            "email": mail.mask(s.email) if s.email else None,
+            "active": s.active, "created_at": s.created_at.isoformat(),
             "last_opened_at": s.last_opened_at.isoformat() if s.last_opened_at else None,
             "opens": s.opens}
 
@@ -85,24 +88,37 @@ def my_shares(db: Session = Depends(get_db), user: User = Depends(current_user))
 def share(body: ShareIn, request: Request, background: BackgroundTasks,
           db: Session = Depends(get_db), user: User = Depends(current_user)):
     p = _participant(db, user)
-    if not settings.sms_configured and not settings.DEMO:
-        raise HTTPException(503, "Texting is not set up on this system yet.")
     name = " ".join((body.name or "").split())[:80]
     if len(name) < 2:
         raise HTTPException(422, "Give their name, so you know who has your log.")
-    number = normalize_phone(body.phone)
-    if not number or len(number) < 11:
+    number = normalize_phone(body.phone) if (body.phone or "").strip() else None
+    address = mail.normalize(body.email) if (body.email or "").strip() else None
+    if (body.phone or "").strip() and (not number or len(number) < 11):
         raise HTTPException(422, "Enter their mobile number, with the area code.")
-    if normalize_phone(user.phone) == number:
-        raise HTTPException(422, "That is your own number. Open your log from here instead.")
-    if sms.opted_out(db, number):
-        raise HTTPException(409, f"{confirming.first_name(name)} has asked not to get texts from "
-                                 f"{confirming.BRAND}. Ask them to text START to the number first.")
+    if (body.email or "").strip() and not address:
+        raise HTTPException(422, "That email address does not look right.")
+    if not number and not address:
+        raise HTTPException(422, "Enter a mobile number or an email address to send it to.")
+    if number and address:
+        raise HTTPException(422, "Pick one: text them or email them. You can add the other afterwards.")
+    if number:
+        if not settings.sms_configured and not settings.DEMO:
+            raise HTTPException(503, "Texting is not set up on this system yet.")
+        if normalize_phone(user.phone) == number:
+            raise HTTPException(422, "That is your own number. Open your log from here instead.")
+        if sms.opted_out(db, number):
+            raise HTTPException(409, f"{confirming.first_name(name)} has asked not to get texts from "
+                                     f"{confirming.BRAND}. Ask them to text START to the number first.")
+    else:
+        if not settings.email_configured and not settings.DEMO:
+            raise HTTPException(503, "Email is not set up on this system yet. Send a text instead.")
+        if (user.email or "").strip().lower() == address:
+            raise HTTPException(422, "That is your own email. Open your log from here instead.")
     live = db.scalars(select(LogShare).where(LogShare.user_id == user.id,
                                              LogShare.revoked_at.is_(None))).all()
-    if any(s.phone == number for s in live):
+    if any((number and s.phone == number) or (address and s.email == address) for s in live):
         raise HTTPException(409, f"{confirming.first_name(name)} already has your log. "
-                                 "The link in their text still works.")
+                                 "The link they were sent still works.")
     if len(live) >= SHARES_AT_ONCE:
         raise HTTPException(409, f"You can share with {SHARES_AT_ONCE} people at a time. "
                                  "Stop sharing with someone first.")
@@ -110,17 +126,19 @@ def share(body: ShareIn, request: Request, background: BackgroundTasks,
         raise HTTPException(429, "That is as many as you can send today. Try again tomorrow.")
 
     token, digest = confirming.new_token()
-    s = LogShare(county_id=p.county_id, user_id=user.id, name=name, phone=number, token_hash=digest)
+    s = LogShare(county_id=p.county_id, user_id=user.id, name=name, phone=number, email=address,
+                 token_hash=digest)
     db.add(s)
     db.commit()
+    where = sms.mask(number) if number else mail.mask(address)
     audit(db, user, "share_log", target_type="user", target_id=user.id,
-          detail=f"with {name} ({sms.mask(number)})", request=request)
+          detail=f"with {name} ({where}) by {s.via}", request=request)
 
     link = f"{_base_url(request)}/log/{token}"
     background.add_task(_send_share, s.id, link)
-    out = _share_out(s) | {"sent": sms.can_text(number)}
+    out = _share_out(s) | {"sent": sms.can_text(number) if number else mail.can_email(address)}
     if settings.DEMO and not out["sent"]:
-        out["demo_link"] = link            # demo only: the text that would have gone out
+        out["demo_link"] = link            # demo only: the message that would have gone out
     return out
 
 
@@ -132,8 +150,13 @@ def _send_share(share_id: int, link: str) -> None:
         who = db.get(User, s.user_id) if s else None
         if s is None or who is None:
             return
-        sms.send(db, s.phone, confirming.share_text(who.name, link), purpose="share",
-                 user_id=who.id, county_id=s.county_id)
+        if s.phone:
+            sms.send(db, s.phone, confirming.share_text(who.name, link), purpose="share",
+                     user_id=who.id, county_id=s.county_id)
+        elif s.email:
+            subject, text, html = confirming.share_email(who.name, link)
+            mail.send(db, s.email, subject, text, html=html, purpose="share",
+                      user_id=who.id, county_id=s.county_id)
     finally:
         db.close()
 
@@ -147,7 +170,8 @@ def stop_sharing(share_id: int, request: Request, db: Session = Depends(get_db),
     s.revoked_at = datetime.now(timezone.utc)
     db.commit()
     audit(db, user, "stop_sharing_log", target_type="user", target_id=user.id,
-          detail=f"with {s.name} ({sms.mask(s.phone)})", request=request)
+          detail=f"with {s.name} ({sms.mask(s.phone) if s.phone else mail.mask(s.email)})",
+          request=request)
 
 
 @router.get("/shared/{token}")

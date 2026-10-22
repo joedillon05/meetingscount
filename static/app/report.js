@@ -23,10 +23,10 @@ const RESULT = {
 const OUTCOME = {
   counted: ['Counts', 'ok'], pending: ['Awaiting a decision', 'warn'], 'not counted': ['Does not count', 'bad'],
 };
-const CATEGORY = { public: 'public meeting', community_service: 'community service',
-  private: 'private meeting', therapy: 'therapy', any: 'meeting' };
-const REQ_NOUN = { public: 'public meetings', community_service: 'community service sessions',
-  private: 'private meetings', therapy: 'therapy sessions', any: 'meetings' };
+const CATEGORY = { public: 'public meeting', private: 'private meeting', support_group: 'support group',
+  community_service: 'community service', therapy: 'therapy', any: 'meeting' };
+const REQ_NOUN = { public: 'public meetings', private: 'private meetings', support_group: 'support group sessions',
+  community_service: 'community service sessions', therapy: 'therapy sessions', any: 'meetings' };
 
 async function boot() {
   const pid = params.get('participant');

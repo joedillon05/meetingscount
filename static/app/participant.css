@@ -214,3 +214,33 @@ b.code { font-size: 19px; letter-spacing: .1em; font-variant-numeric: tabular-nu
 .places { max-height: 46vh; overflow: auto; }
 .places .pick-row b { display: block; }
 .places .pick-row .small { display: block; margin-top: 2px; font-weight: 500; }
+
+/* ---------- finding meetings where you stand ---------- */
+.near-btn { min-height: 60px; font-size: 17px; }
+.near-btn .ic { width: 22px; height: 22px; }
+.near-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 2px 0; }
+.near-head p { font-size: 14px; color: var(--muted); }
+.near-empty { display: grid; gap: 12px; }
+.near-empty p { color: var(--ink-2); }
+.near-empty .btn { margin-top: 2px; }
+.m-dist { font-weight: 650; color: var(--ok); }
+.hint { font-size: 14px; color: var(--muted); text-align: center; padding: 2px 8px; }
+.hint a { color: var(--brand); font-weight: 600; }
+.add-row { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); }
+
+/* ---------- adding a meeting: when and where ---------- */
+.seg { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 12px; margin-top: 4px; }
+.seg button { flex: 1; min-height: 40px; border: 0; border-radius: 9px; background: transparent; font-weight: 600;
+  color: var(--ink-2); cursor: pointer; }
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.ends-at { font-size: 14px; color: var(--muted); margin-top: -2px; }
+.spot { display: grid; gap: 8px; }
+.map-box { height: 240px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); }
+.map-box.hidden { display: none; }
+.map-note { font-size: 13px; color: var(--muted); }
+.leaflet-container { font: inherit; }
+
+/* ---------- a bigger way in for people with no profile yet ---------- */
+.signin .create { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); display: grid; gap: 10px; text-align: center; }
+.signin .create p { font-weight: 600; color: var(--ink-2); }
+.signin .create .btn { margin-top: 0; }

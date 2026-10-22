@@ -50,7 +50,7 @@ class Settings:
 
     # The wording of the participant consent screen. Bump it when the text
     # changes in a way people should agree to again.
-    CONSENT_VERSION: str = "2026-10-20"
+    CONSENT_VERSION: str = "2026-10-21"
 
     # One shared password in front of a preview deployment, so a demo on a
     # public URL is not a public demo. This is a door lock, not a sign-in:
@@ -104,6 +104,14 @@ class Settings:
     # How long a confirmation link stays usable.
     CONFIRM_LINK_DAYS: int = int(os.environ.get("MC_CONFIRM_LINK_DAYS", "7"))
 
+    # Email goes through SendGrid (Twilio's email service). Unset means
+    # nothing is sent and the email option does not show. MC_EMAIL_FROM has
+    # to be an address SendGrid has verified, such as
+    # attendance@actionscountplus.com.
+    SENDGRID_API_KEY: str = os.environ.get("MC_SENDGRID_API_KEY", "")
+    EMAIL_FROM: str = os.environ.get("MC_EMAIL_FROM", "")
+    EMAIL_FROM_NAME: str = os.environ.get("MC_EMAIL_FROM_NAME", "ActionsCount+")
+
     # Self-serve profiles, paid through Stripe. Someone whose county is not
     # on ActionsCount+ creates their own profile at /join, proves the phone
     # is theirs with a code, and pays for a subscription on Stripe's hosted
@@ -132,6 +140,10 @@ class Settings:
     @property
     def sms_configured(self) -> bool:
         return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and self.TWILIO_FROM)
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.SENDGRID_API_KEY and self.EMAIL_FROM)
 
     @property
     def secret_key_bytes(self) -> bytes:

@@ -23,20 +23,21 @@ DEFAULT_PER_WEEK = 3
 
 
 def make_profile(db: Session, *, name: str, phone: str, email: str | None, per_week: int,
-                 starts_on: datetime, order_reference: str = "self-reported",
-                 status: str | None = None) -> User:
-    """A new self-serve participant. The caller commits."""
+                 starts_on: datetime, ends_on: datetime | None = None,
+                 order_reference: str = "self-reported", status: str | None = None) -> User:
+    """A new self-serve participant. The caller commits. `ends_on` is when
+    probation ends, if the person knows; the requirement stops there too."""
     county, program = billing.self_serve_home(db)
     user = User(county_id=county.id, role=Role.participant, name=name, email=email, phone=phone)
     db.add(user)
     db.flush()
     p = Participant(county_id=county.id, user_id=user.id, program_id=program.id,
-                    officer_id=None, enrolled_on=datetime.now(timezone.utc))
+                    officer_id=None, enrolled_on=datetime.now(timezone.utc), ends_on=ends_on)
     db.add(p)
     db.flush()
     db.add(Requirement(county_id=county.id, participant_id=p.id, category=None,
                        count_required=per_week, period=RequirementPeriod.week,
-                       starts_on=starts_on, order_reference=order_reference))
+                       starts_on=starts_on, ends_on=ends_on, order_reference=order_reference))
     row = billing.ensure_row(db, user)
     if status:
         row.status = status
@@ -58,6 +59,8 @@ COLUMNS = {
                  "weekly", "meetingsrequired"),
     "start": ("start", "startdate", "startson", "starts", "enrolled", "enrolledon", "since",
               "joined", "datejoined"),
+    "end": ("end", "enddate", "endson", "ends", "probationend", "probationenddate",
+            "probationends", "through", "until"),
 }
 
 
@@ -139,9 +142,12 @@ def import_people(db: Session, rows: list[dict], *, covered: bool = False) -> Im
         except ValueError:
             per_week = DEFAULT_PER_WEEK
         email = get("email") or None
+        starts_on = _date(get("start")) or datetime.now(timezone.utc)
+        ends_on = _date(get("end"))
+        if ends_on is not None and ends_on <= starts_on:
+            ends_on = None                                   # a typo in the sheet, not a one-day order
         user = make_profile(db, name=name, phone=phone, email=email[:200] if email else None,
-                            per_week=per_week,
-                            starts_on=_date(get("start")) or datetime.now(timezone.utc),
+                            per_week=per_week, starts_on=starts_on, ends_on=ends_on,
                             order_reference="moved from the old site",
                             status="covered" if covered else None)
         report.created.append(f"{name}, {per_week} a week")

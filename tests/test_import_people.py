@@ -15,13 +15,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ROWS = [
     {"First Name": "Avery", "Last Name": "Stone", "Cell Phone": "(734) 555-0191",
-     "Email": "avery@example.com", "Meetings Per Week": "4", "Start Date": "9/1/2026"},
+     "Email": "avery@example.com", "Meetings Per Week": "4", "Start Date": "9/1/2026",
+     "Probation End Date": "3/1/2027"},
     {"First Name": "Blake", "Last Name": "Rivera", "Cell Phone": "734.555.0192",
-     "Email": "", "Meetings Per Week": "", "Start Date": ""},
+     "Email": "", "Meetings Per Week": "", "Start Date": "", "Probation End Date": ""},
     {"First Name": "Casey", "Last Name": "", "Cell Phone": "12", "Email": "",
-     "Meetings Per Week": "", "Start Date": ""},
+     "Meetings Per Week": "", "Start Date": "", "Probation End Date": ""},
     {"First Name": "Dup", "Last Name": "Row", "Cell Phone": "7345550192", "Email": "",
-     "Meetings Per Week": "", "Start Date": ""},
+     "Meetings Per Week": "", "Start Date": "", "Probation End Date": ""},
 ]
 
 
@@ -38,6 +39,7 @@ def test_a_list_becomes_profiles_once(client):
         p = db.query(Participant).filter(Participant.user_id == avery.id).one()
         req = db.query(Requirement).filter(Requirement.participant_id == p.id).one()
         assert req.count_required == 4 and req.starts_on.month == 9
+        assert req.ends_on.year == 2027 and p.ends_on.month == 3
         assert req.order_reference == "moved from the old site"
         assert billing.row_for(db, avery).status == "covered" and billing.row_for(db, avery).active
 

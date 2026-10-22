@@ -67,7 +67,8 @@ class Role(str, enum.Enum):
 class MeetingCategory(str, enum.Enum):
     public = "public"                        # open AA/NA and similar
     private = "private"
-    community_service = "community_service"
+    support_group = "support_group"          # a peer group that is not a recovery meeting
+    community_service = "community_service"  # volunteering
     therapy = "therapy"
 
 
@@ -516,6 +517,7 @@ class Signup(Base):
     email: Mapped[str | None] = mapped_column(String(200))
     per_week: Mapped[int] = mapped_column(Integer, default=3)
     starts_on: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    ends_on: Mapped[datetime | None] = mapped_column(UTCDateTime)       # when probation ends, if known
     code_hash: Mapped[str] = mapped_column(String(64))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     ip: Mapped[str | None] = mapped_column(String(64))
@@ -563,17 +565,19 @@ class Subscription(Base):
 
 class LogShare(Base):
     """
-    A participant's log, shared by text with someone they chose: an officer
-    outside the system, a lawyer, a spouse keeping track. The link shows the
-    log as it stands whenever it is opened, until the participant stops
-    sharing. Only the token's hash is kept, as with confirmation links.
+    A participant's log, shared by text or email with someone they chose: an
+    officer outside the system, a lawyer, a spouse keeping track. The link
+    shows the log as it stands whenever it is opened, until the participant
+    stops sharing. Only the token's hash is kept, as with confirmation links.
+    One of phone and email is set, never both empty.
     """
     __tablename__ = "log_shares"
     id: Mapped[int] = mapped_column(primary_key=True)
     county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(80))
-    phone: Mapped[str] = mapped_column(String(32))
+    phone: Mapped[str | None] = mapped_column(String(32))
+    email: Mapped[str | None] = mapped_column(String(200))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -583,6 +587,28 @@ class LogShare(Base):
     @property
     def active(self) -> bool:
         return self.revoked_at is None
+
+    @property
+    def via(self) -> str:
+        return "email" if self.email and not self.phone else "text"
+
+
+class EmailLog(Base):
+    """
+    Every email the system tried to send and what came of it, the way sms_log
+    does for texts. No body is kept: the subject says what it was.
+    """
+    __tablename__ = "email_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    to_email: Mapped[str] = mapped_column(String(200), index=True)
+    purpose: Mapped[str] = mapped_column(String(32))      # share
+    subject: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(16))       # sent, failed, skipped
+    provider_id: Mapped[str | None] = mapped_column(String(120))
+    error: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class AuditLog(Base):

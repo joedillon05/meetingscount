@@ -5,7 +5,7 @@ import { $, esc, icon, makeApi, toast } from './lib.js';
 
 const api = makeApi({ get: () => '' });          // no dev identity on this page
 const app = $('#app');
-const S = { ctx: {}, me: null };
+const S = { ctx: {}, me: null, draft: null };
 
 function logo() {
   return `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--brand)"/>
@@ -38,24 +38,27 @@ function next({ canceled = false, created = false } = {}) {
 
 /* ---------- 1. who you are ---------- */
 
-function renderProfile() {
+function renderProfile(saved = {}) {
   const today = new Date(); today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  const v = k => esc(saved[k] ?? '');
   app.innerHTML = `<main class="join">
     ${head()}${steps(1)}
     <h1>Create your profile</h1>
-    <p class="lead">For people whose court or program is not on ActionsCount+ yet. You pay for it yourself and keep your own verified record of every meeting.</p>
     <form id="profileForm" novalidate>
-      <label for="name">Your name <span class="muted">as your officer knows it</span></label>
-      <input id="name" name="name" autocomplete="name" maxlength="120" required>
+      <label for="name">Name</label>
+      <input id="name" name="name" autocomplete="name" maxlength="120" required value="${v('name')}">
       <label for="phone">Mobile number</label>
-      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(734) 555-0101" required>
+      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(734) 555-0101" required value="${v('phone')}">
       <label for="email">Email <span class="muted">for receipts, optional</span></label>
-      <input id="email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="200">
-      <label for="perWeek">Meetings a week your order requires</label>
+      <input id="email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="200" value="${v('email')}">
+      <p class="callout note">${icon('note')}<span>For participants whose court or program requires ActionsCount+, enter the information below. The name above should be your name as the program requiring attendance knows it. If you are tracking your own attendance, you can still use meetings a week.</span></p>
+      <label for="perWeek">Meetings a week required</label>
       <select id="perWeek" name="per_week">${[1, 2, 3, 4, 5, 6, 7].map(n =>
-        `<option value="${n}" ${n === 3 ? 'selected' : ''}>${n} a week</option>`).join('')}</select>
+        `<option value="${n}" ${n === Number(saved.per_week || 3) ? 'selected' : ''}>${n} a week</option>`).join('')}</select>
       <label for="starts">Counting from</label>
-      <input id="starts" name="starts_on" type="date" value="${today.toISOString().slice(0, 10)}" required>
+      <input id="starts" name="starts_on" type="date" value="${v('starts_on') || today.toISOString().slice(0, 10)}" required>
+      <label for="ends">Probation end date <span class="muted">if you know it</span></label>
+      <input id="ends" name="ends_on" type="date" value="${v('ends_on')}">
       <p class="err" id="err" role="alert" hidden></p>
       <button class="btn block big" type="submit">Text me a code</button>
     </form>
@@ -69,10 +72,16 @@ function renderProfile() {
     const phone = f.phone.value.trim();
     if (f.name.value.trim().length < 2) return showError('Enter your name.');
     if (phone.replace(/\D/g, '').length < 10) return showError('Enter the full mobile number, including the area code.');
+    if (f.ends_on.value && f.starts_on.value && f.ends_on.value <= f.starts_on.value) {
+      return showError('The probation end date has to come after the start date.');
+    }
     const btn = f.querySelector('button');
     btn.disabled = true; btn.textContent = 'Sending';
     const body = { name: f.name.value.trim(), phone, email: f.email.value.trim() || null,
-                   per_week: Number(f.per_week.value), starts_on: f.starts_on.value ? `${f.starts_on.value}T12:00:00Z` : null };
+                   per_week: Number(f.per_week.value), starts_on: f.starts_on.value ? `${f.starts_on.value}T12:00:00Z` : null,
+                   ends_on: f.ends_on.value ? `${f.ends_on.value}T12:00:00Z` : null };
+    S.draft = { name: body.name, phone, email: f.email.value.trim(), per_week: body.per_week,
+                starts_on: f.starts_on.value, ends_on: f.ends_on.value };
     try {
       const r = await api('/api/signup/start', { method: 'POST', body: JSON.stringify(body) });
       renderCode(phone, r);
@@ -106,7 +115,7 @@ function renderCode(phone, sent) {
     input.value = input.value.replace(/\D/g, '').slice(0, 6);
     if (input.value.length === 6) $('#codeForm').requestSubmit();
   });
-  app.querySelector('[data-back]').onclick = renderProfile;
+  app.querySelector('[data-back]').onclick = () => renderProfile(S.draft || {});
   $('#codeForm').onsubmit = async e => {
     e.preventDefault();
     const btn = e.target.querySelector('button');
@@ -198,8 +207,8 @@ function allSet({ county = false, created = false } = {}) {
       : esc(b.words)}</p>
     <ul class="plain" style="text-align:left">
       <li>Open the app and read the short consent screen.</li>
-      <li>Pick your town to see meetings near you.</li>
-      <li>Tap check in when you arrive. One tap, no paper.</li>
+      <li>At a meeting, tap <b>Find meetings near me</b>, then check in. One tap, no paper.</li>
+      <li>Not on the list? Add it right there. It still counts.</li>
     </ul>
     <a class="btn block big" href="/">Open ActionsCount+</a>
     <button class="btn block ghost" type="button" data-signout>Sign out</button>

@@ -78,7 +78,33 @@ export const day = d => fmt({ weekday: 'long', month: 'long', day: 'numeric' }).
 export const shortDay = d => fmt({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(d));
 export const monthDay = d => fmt({ month: 'short', day: 'numeric' }).format(new Date(d));
 export const weekday = d => fmt({ weekday: 'long' }).format(new Date(d));
+export const longDate = d => fmt({ month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(d));
 export const dateTime = d => `${shortDay(d)}, ${time(d)}`;
+
+/* "19:05" in the county's zone, for a <input type="time">. */
+export function wallClock(d = new Date()) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' })
+    .formatToParts(new Date(d));
+  const get = t => p.find(x => x.type === t).value;
+  return `${String(Number(get('hour')) % 24).padStart(2, '0')}:${get('minute')}`;
+}
+
+/* The instant that is `hhmm` on the calendar day `dateKey` (YYYY-MM-DD) in
+   the county's zone. Two passes settle the offset across a DST change. */
+export function fromZoned(dateKey, hhmm) {
+  const [y, mo, d] = dateKey.split('-').map(Number);
+  const [hh, mm] = hhmm.split(':').map(Number);
+  const wall = Date.UTC(y, mo - 1, d, hh, mm);
+  let utc = wall;
+  for (let i = 0; i < 2; i++) utc = wall - zoneOffsetMs(utc);
+  return new Date(utc);
+}
+function zoneOffsetMs(ms) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms));
+  const g = t => Number(p.find(x => x.type === t).value);
+  return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'), g('second')) - ms;
+}
 
 /* Calendar parts in the county's zone. Always en-US here, because these are
    keys for grouping, not text anyone reads. */

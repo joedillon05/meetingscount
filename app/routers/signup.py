@@ -52,7 +52,7 @@ def start(body: SignupStartIn, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(404, CLOSED)
     name = " ".join(body.name.split())
     if len(name) < 2:
-        raise HTTPException(422, "Enter your name as your officer knows it.")
+        raise HTTPException(422, "Enter your name as your court or program knows it.")
     phone = normalize_phone(body.phone)
     if not phone or len(phone) < 12:
         raise HTTPException(422, "Enter the full mobile number, including the area code.")
@@ -66,9 +66,15 @@ def start(body: SignupStartIn, request: Request, db: Session = Depends(get_db)):
     starts = body.starts_on or datetime.now(timezone.utc)
     if starts.tzinfo is None:
         starts = starts.replace(tzinfo=timezone.utc)
+    ends = body.ends_on
+    if ends is not None:
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=timezone.utc)
+        if ends <= starts:
+            raise HTTPException(422, "The probation end date has to come after the start date.")
     code = new_login_code()
     row = Signup(phone=phone, name=name[:120], email=email, per_week=body.per_week,
-                 starts_on=starts, code_hash=keyed_hash(f"signup:{phone}", code), ip=ip,
+                 starts_on=starts, ends_on=ends, code_hash=keyed_hash(f"signup:{phone}", code), ip=ip,
                  expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.LOGIN_CODE_MINUTES))
     db.add(row)
     db.commit()
@@ -114,7 +120,8 @@ def verify(body: SignupVerifyIn, request: Request, response: Response,
     created = user is None
     if created:
         user = profiles.make_profile(db, name=row.name, phone=phone, email=row.email,
-                                     per_week=row.per_week, starts_on=row.starts_on)
+                                     per_week=row.per_week, starts_on=row.starts_on,
+                                     ends_on=row.ends_on)
     row.user_id = user.id
     db.commit()
 

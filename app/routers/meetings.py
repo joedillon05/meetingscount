@@ -16,6 +16,8 @@ from .checkins import meeting_visible_to
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 ADDED_PER_DAY = 3                # meetings a participant may add in 24 hours
+ADDED_START_GRACE_MIN = 60       # it may have started this long ago: still inside the check-in window
+ADDED_DAYS_AHEAD = 8             # and may be this far ahead: the week the phone shows
 
 
 def with_window(m: Meeting, now: datetime | None = None) -> dict:
@@ -102,21 +104,31 @@ def create_meeting(body: MeetingIn, request: Request,
     source = body.source
     fields = body.model_dump(exclude={"source"})
     if user.role == Role.participant:
-        # A participant adds a meeting that is not on the list, where they are,
-        # starting now. It counts, so nothing about it is theirs to bend: the
-        # server sets the time, the distance and the window, and it is marked
-        # as added everywhere it shows.
+        # A participant adds a meeting that is not on the list: one they are
+        # at right now, or one coming up this week that they will check in to
+        # when they get there. It counts, so nothing about it is theirs to
+        # bend: the server sets the distance and the window, keeps the start
+        # inside a range a check-in can still verify, and marks it as added
+        # everywhere it shows. A meeting that already happened is not theirs
+        # to add after the fact.
         source = MeetingSource.personal
         fields["address"] = (body.address or "").strip()[:300]
         if not fields["address"]:
             raise HTTPException(422, "Say where the meeting is, so whoever reads your log knows.")
+        now = datetime.now(timezone.utc)
+        starts = body.starts_at if body.starts_at.tzinfo else body.starts_at.replace(tzinfo=timezone.utc)
+        if starts < now - timedelta(minutes=ADDED_START_GRACE_MIN):
+            raise HTTPException(422, "A meeting that already happened cannot be added afterwards. "
+                                     "If you were there, ask your officer to record it.")
+        if starts > now + timedelta(days=ADDED_DAYS_AHEAD):
+            raise HTTPException(422, f"You can add a meeting up to {ADDED_DAYS_AHEAD} days ahead.")
         added_today = db.scalar(select(func.count(Meeting.id)).where(
             Meeting.created_by_id == user.id, Meeting.source == MeetingSource.personal,
-            Meeting.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))) or 0
+            Meeting.created_at >= now - timedelta(hours=24))) or 0
         if added_today >= ADDED_PER_DAY:
             raise HTTPException(429, f"You can add {ADDED_PER_DAY} meetings a day. "
                                      "If you went to more, ask your officer to record them.")
-        fields |= {"starts_at": datetime.now(timezone.utc), "radius_ft": 500, "time_window_min": 60,
+        fields |= {"starts_at": starts, "radius_ft": 500, "time_window_min": 60,
                    "duration_min": min(fields["duration_min"], 240)}
     m = Meeting(county_id=user.county_id, created_by_id=user.id, **fields, source=source)
     if m.starts_at.tzinfo is None:

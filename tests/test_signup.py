@@ -287,6 +287,34 @@ def test_a_profile_exists_only_after_the_code_and_cannot_check_in_until_paid(cli
     assert "subscription" in r.json()["detail"].lower()
 
 
+def test_a_probation_end_date_lands_on_the_profile_and_its_requirement(client, stripe):
+    fake, phones = stripe
+    phone = fresh_phone()
+    r = client.post("/api/signup/start", json={
+        "name": "Harper Quinn", "phone": phone, "per_week": 2,
+        "starts_on": "2026-10-01T12:00:00Z", "ends_on": "2027-04-01T12:00:00Z"})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/signup/verify", json={"phone": phone, "code": _code_texted(phones, phone)})
+    assert r.status_code == 200, r.text
+    me = client.get("/api/me").json()
+    assert me["ends_on"].startswith("2027-04-01")
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.phone == security.normalize_phone(phone)).one()
+        p = db.query(Participant).filter(Participant.user_id == u.id).one()
+        req = db.query(Requirement).filter(Requirement.participant_id == p.id).one()
+        assert p.ends_on.year == 2027 and req.ends_on.year == 2027 and req.count_required == 2
+    finally:
+        db.close()
+    export = client.get("/api/my/export").json()
+    assert export["case"]["ends_on"].startswith("2027-04-01")
+
+    backwards = client.post("/api/signup/start", json={
+        "name": "Harper Quinn", "phone": fresh_phone(), "per_week": 2,
+        "starts_on": "2026-10-01T12:00:00Z", "ends_on": "2026-09-01T12:00:00Z"})
+    assert backwards.status_code == 422 and "after the start" in backwards.json()["detail"]
+
+
 def test_wrong_codes_fail_and_a_code_works_once(client, stripe):
     fake, phones = stripe
     phone = fresh_phone()

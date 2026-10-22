@@ -45,24 +45,31 @@ def test_caseload_hides_coordinates_from_confirmed_checkins(client, ids):
 
 def test_a_meeting_a_participant_adds_counts_and_is_marked_as_theirs(client, ids):
     """It counts, but the participant cannot bend it: the server sets the
-    source, the time, the distance and the window, and it says where it is."""
+    source, the distance and the window, keeps the start where a check-in can
+    still verify it, and it says where it is."""
     from app.models import Meeting
     from app.db import SessionLocal
     db = SessionLocal()
     db.query(Meeting).filter(Meeting.created_by_id == ids["participant"]).delete()
     db.commit(); db.close()
 
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    now = datetime.now(timezone.utc)
+    yesterday = (now - timedelta(days=1)).isoformat()
     body = {"name": "Tuesday night group", "category": "public", "source": "staff",
-            "lat": 42.0, "lng": -83.0, "starts_at": yesterday, "radius_ft": 5280,
+            "lat": 42.0, "lng": -83.0, "starts_at": now.isoformat(), "radius_ft": 5280,
             "time_window_min": 480}
     r = client.post("/api/meetings", json=body, headers=as_(ids["participant"]))
     assert r.status_code == 422, "where it is, is required"
-    m = client.post("/api/meetings", json=body | {"address": "St. Mary's, 2nd floor"},
-                    headers=as_(ids["participant"])).json()
+    body |= {"address": "St. Mary's, 2nd floor"}
+    r = client.post("/api/meetings", json=body | {"starts_at": yesterday}, headers=as_(ids["participant"]))
+    assert r.status_code == 422 and "already happened" in r.json()["detail"], "no backdating"
+    r = client.post("/api/meetings", json=body | {"starts_at": (now + timedelta(days=9)).isoformat()},
+                    headers=as_(ids["participant"]))
+    assert r.status_code == 422 and "days ahead" in r.json()["detail"]
+    m = client.post("/api/meetings", json=body, headers=as_(ids["participant"])).json()
     assert m["source"] == "personal" and m["added"] is True and m["counts"] is True
     assert m["radius_ft"] == 500 and m["time_window_min"] == 60
-    assert m["starts_at"] > yesterday, "no backdating"
+    assert m["starts_at"] > yesterday
 
     for _ in range(2):
         assert client.post("/api/meetings", json=body | {"address": "here"},

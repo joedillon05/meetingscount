@@ -8,7 +8,8 @@ Bring people over from the old site, so they only have to sign in.
 
 Takes a .csv or .xlsx with a header row. Columns are matched by name: a name
 (or first and last name) and a mobile number are needed; an email, meetings
-a week (3 if missing) and a start date are used when they are there. Anyone
+a week (3 if missing), a start date and a probation end date are used when
+they are there. Anyone
 whose number already has an account is left alone, so the same list can be
 run twice.
 

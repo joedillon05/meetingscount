@@ -25,8 +25,8 @@ const OVERALL = {
   met: ['On track', 'ok', 'check'], short: ['Behind', 'bad', 'x'],
   pending: ['Awaiting review', 'warn', 'clock'], none: ['No requirement', 'neutral', 'note'],
 };
-const CATEGORY = { public: 'Public', community_service: 'Community service', private: 'Private', therapy: 'Therapy', any: 'Any' };
-const REQ_NOUN = { public: 'public meetings', community_service: 'community service', private: 'private meetings', therapy: 'therapy sessions', any: 'meetings' };
+const CATEGORY = { public: 'Public', private: 'Private', support_group: 'Support group', community_service: 'Community service', therapy: 'Therapy', any: 'Any' };
+const REQ_NOUN = { public: 'public meetings', private: 'private meetings', support_group: 'support group sessions', community_service: 'community service', therapy: 'therapy sessions', any: 'meetings' };
 
 const pill = (key) => { const [label, tone, ic] = OVERALL[key] || OVERALL.none;
   return `<span class="badge tone-${tone}">${icon(ic)} ${label}</span>`; };
@@ -474,8 +474,9 @@ const dateToIso = v => v ? new Date(`${v}T12:00:00`).toISOString() : null;
 
 function requirementSheet(pid, existing = null) {
   const r = existing || {};
-  const cats = [['public', 'Public meetings'], ['community_service', 'Community service'],
-    ['private', 'Private meetings'], ['any', 'Any meeting']];
+  const cats = [['public', 'Public meetings'], ['private', 'Private meetings'],
+    ['support_group', 'Support group'], ['therapy', 'Therapy'],
+    ['community_service', 'Community service'], ['any', 'Any meeting']];
   const sh = sheet(`<form class="step left" id="reqForm">
     <h2>${existing ? 'Amend the requirement' : 'Add a requirement'}</h2>
     <p class="muted">What the order says, in the court's words: how many, of what, per week or month.</p>
@@ -612,8 +613,9 @@ async function viewMeetings() {
           <form id="newMeeting" class="form">
             <label>Name<input name="name" required maxlength="200" placeholder="AA Open Meeting, St. Andrew's"></label>
             <div class="two">
-              <label>Type<select name="category"><option value="public">Public</option><option value="community_service">Community service</option>
-                <option value="private">Private</option></select></label>
+              <label>Type<select name="category"><option value="public">Public</option><option value="private">Private</option>
+                <option value="support_group">Support group</option><option value="therapy">Therapy</option>
+                <option value="community_service">Community service</option></select></label>
               <label>Starts<input name="starts_at" type="datetime-local" required></label>
               <label>Length (min)<input name="duration_min" type="number" value="60" min="5" max="1440"></label>
               <label>Radius (ft)<input name="radius_ft" type="number" value="500" min="50" max="5280"></label>

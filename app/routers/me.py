@@ -54,6 +54,8 @@ def me(db: Session = Depends(get_db), user: User = Depends(current_user)):
         "program": program.name if program else None,
         "officer": p.officer.name if p and p.officer else None,
         "case_number": p.case_number if p else None,
+        # When probation ends, if it was given at sign-up or by an officer.
+        "ends_on": p.ends_on.isoformat() if p and p.ends_on else None,
         "area": ({"label": user.area_label, "lat": user.area_lat, "lng": user.area_lng}
                  if user.area_lat is not None else None),
         # None for someone their county enrolled. A self-serve profile sees
@@ -137,6 +139,7 @@ def my_export(request: Request, db: Session = Depends(get_db),
         "case": ({"case_number": p.case_number,
                   "officer": p.officer.name if p.officer else None,
                   "enrolled_on": p.enrolled_on.isoformat(),
+                  "ends_on": p.ends_on.isoformat() if p.ends_on else None,
                   "requirements": [
                       {"category": r.category.value if r.category else "any",
                        "count_required": r.count_required, "period": r.period.value,

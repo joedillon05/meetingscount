@@ -106,6 +106,33 @@ def share_text(participant: str, link: str) -> str:
             f"up to date whenever you open it: {link}\nReply STOP to opt out.")
 
 
+def share_email(participant: str, link: str) -> tuple[str, str, str]:
+    """(subject, plain text, html) for the same share, sent by email."""
+    who = short_name(participant)
+    subject = f"{who} shared their meeting log with you"
+    text = (f"{who} shared their {BRAND} meeting log with you.\n\n"
+            f"Open it here: {link}\n\n"
+            "The link shows the log as it stands whenever you open it, so you always see the "
+            "latest. It keeps working until they stop sharing.\n\n"
+            f"If you were not expecting this, you can ignore it. {BRAND} never asks for "
+            "a password or payment by email.")
+    html = (f"<p>{_h(who)} shared their {BRAND} meeting log with you.</p>"
+            f'<p><a href="{_h(link)}" style="display:inline-block;padding:12px 18px;'
+            'background:#1f5eff;color:#fff;border-radius:10px;text-decoration:none;'
+            f'font-weight:600">Open the log</a></p>'
+            f'<p style="color:#555">Or copy this link: {_h(link)}</p>'
+            "<p>The link shows the log as it stands whenever you open it, so you always see "
+            "the latest. It keeps working until they stop sharing.</p>"
+            f"<p style=\"color:#777;font-size:13px\">If you were not expecting this, you can "
+            f"ignore it. {BRAND} never asks for a password or payment by email.</p>")
+    return subject, text, html
+
+
+def _h(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
 def ask_text(participant: str, meeting: str, when: str, link: str) -> str:
     return (f"{BRAND}: {short_name(participant)} asked you to confirm they were at "
             f"{meeting} {when}. Tap to answer: {link}\nReply STOP to opt out.")
