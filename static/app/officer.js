@@ -9,6 +9,7 @@ import {
   plural, setTimeZone, sheet, shortDay, time, toast,
 } from './lib.js';
 import { mountQueue, unmountQueue } from './queue.js';
+import { mountTeam, unmountTeam } from './team.js';
 
 const identity = devIdentity('mc_act_staff');
 const api = makeApi(identity);
@@ -62,6 +63,7 @@ async function boot() {
 
 const ctx = {
   api, sheet,
+  get me() { return S.me; },
   onChange: counts => setBadge(counts.open),
 };
 
@@ -78,6 +80,7 @@ function renderShell() {
         ${admin ? `<a data-nav="staff" href="#staff">${icon('users')}<span>Staff</span></a>
         <a data-nav="audit" href="#audit">${icon('scroll')}<span>Audit log</span></a>
         <a data-nav="texts" href="#texts">${icon('note')}<span>Texts</span></a>` : ''}
+        ${S.me.role === 'superuser' ? `<a data-nav="team" href="#team">${icon('briefcase')}<span>Team</span></a>` : ''}
       </nav>
       <span class="spacer"></span>
       ${S.staff ? `<a class="navlink" href="/ops">Ops</a><a class="navlink" href="/">Phone app</a>
@@ -89,6 +92,18 @@ function renderShell() {
     if (e.target.closest('[data-act="switch"]')) switchUser();
     if (e.target.closest('[data-act="account"]')) accountSheet();
   });
+  fitHeader();
+  window.addEventListener('resize', fitHeader);
+}
+
+/* A superuser has one more section than fits beside the name on a tablet.
+   When the header would spill off the right edge, the section labels drop
+   to their icons, the way they do on a phone. */
+function fitHeader() {
+  const top = $('.top');
+  if (!top) return;
+  top.classList.remove('tight');
+  if (top.scrollWidth > top.clientWidth + 1) top.classList.add('tight');
 }
 
 function logo() {
@@ -99,6 +114,7 @@ function logo() {
 function route() {
   const [view = 'caseload', a, b] = (location.hash.slice(1) || 'caseload').split('/');
   if (S.view === 'queue' && view !== 'queue') unmountQueue();
+  if (S.view === 'team' && view !== 'team') unmountTeam();
   if (S.mmap) { S.mmap.remove(); S.mmap = null; }
   S.view = view;
   $$('[data-nav]').forEach(n => n.classList.toggle('on', n.dataset.nav === (view === 'participant' ? 'caseload' : view)));
@@ -110,6 +126,7 @@ function route() {
   if (view === 'staff') return viewStaff();
   if (view === 'audit') return viewAudit();
   if (view === 'texts') return viewTexts();
+  if (view === 'team') return viewTeam(v, a);
   return viewCaseload();
 }
 
@@ -859,6 +876,13 @@ function manageStaffSheet(u) {
   };
 }
 
+/* ---------- team: the founders' own back office ---------- */
+
+function viewTeam(v, tab) {
+  if (S.me.role !== 'superuser') { location.hash = 'caseload'; return; }
+  mountTeam(ctx, v, { tab: tab || 'tasks' });
+}
+
 /* ---------- texts ---------- */
 
 const TEXT_STATUS = {
@@ -961,6 +985,13 @@ const ACTIONS = {
   sms_opt_out: 'A number opted out of texts', login_code_requested: 'Participant asked for a sign-in code',
   issue_access_code: 'Issued a sign-in code', sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
   create_staff: 'Added a staff member', reset_staff_password: 'Reset a staff password', update_staff: 'Changed a staff account',
+  team_add_task: 'Added a team task', team_update_task: 'Changed a team task', team_note_task: 'Noted on a team task',
+  team_log_hours: 'Logged hours', team_edit_hours: 'Edited logged hours', team_delete_hours: 'Deleted logged hours',
+  team_set_rate: 'Set an hourly rate', team_submit_timesheet: 'Submitted a timesheet',
+  team_approve_timesheet: 'Approved a timesheet', team_return_timesheet: 'Sent back a timesheet',
+  team_pay_timesheet: 'Marked a timesheet paid', team_add_expense: 'Added an expense',
+  team_edit_expense: 'Edited an expense', team_delete_expense: 'Deleted an expense',
+  team_reimburse_expense: 'Marked an expense paid back',
   change_password: 'Changed their password', enable_mfa: 'Turned on an authenticator app', disable_mfa: 'Turned off an authenticator app',
 };
 

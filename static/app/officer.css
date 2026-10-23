@@ -37,6 +37,8 @@ main#view > * { min-width: 0; }
   .org, .navlink { display: none; }
   .top { gap: 12px; }
 }
+.top.tight .nav a { padding: 0 10px; }
+.top.tight .nav a span:not(.count) { display: none; }
 @media (max-width: 860px) {
   .top { gap: 8px; padding: 0 12px; }
   .nav a { padding: 0 10px; }
@@ -333,6 +335,27 @@ td.right { text-align: right; }
 .kv.setup { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 10px 0 4px; }
 .kv.setup dt { color: var(--muted); }
 .kv.setup dd { margin: 0; }
+
+/* ---------- team ---------- */
+.overdue { color: var(--bad); font-weight: 650; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.logform { display: grid; grid-template-columns: 150px 100px minmax(200px, 1fr) 200px auto; gap: 10px; align-items: end; }
+.logform label { display: grid; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.logform .btn { min-height: 40px; }
+.card > .err { margin-top: 8px; }
+@media (max-width: 960px) { .logform { grid-template-columns: 1fr 1fr; } .logform .grow { grid-column: 1 / -1; } }
+.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.people .card + .card { margin-top: 0; }
+.owed { display: grid; margin: 10px 0 12px; }
+.owed .tv.ok { color: var(--ok); }
+.kv.bal { font-size: 14px; gap: 6px 16px; }
+.kv.bal dd { font-weight: 600; font-variant-numeric: tabular-nums; }
+.notes { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; display: grid; gap: 8px; }
+.notes h3 { font-size: 14px; }
+.notes .tl { margin: 0; }
+.notes .tl li { grid-template-columns: 1fr; gap: 2px; }
+.callout:empty { display: none; }
+.tabbar a[href^="#team"] { font-size: 15px; }
 
 /* ---------- phones ----------
    The dashboard is desktop first, but an officer will open it from a text

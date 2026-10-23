@@ -1,12 +1,14 @@
 """Request and response shapes. Pydantic does the validation FastAPI documents."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import MeetingCategory, MeetingSource, RequirementPeriod, ReviewDecision, Role
+from .models import (
+    MeetingCategory, MeetingSource, RequirementPeriod, ReviewDecision, Role, TeamTaskStatus,
+)
 
 
 class MeetingIn(BaseModel):
@@ -233,3 +235,81 @@ def checkin_out(c: Any, meeting: Any = None, *, include_pin: bool = False) -> di
                         "counts": meeting.counts_toward_requirement,
                         "added": meeting.added_by_participant}
     return d
+
+
+# --------------------------------------------------------------------------- #
+# The founders' back office (routers/team.py). Money is whole cents, time is
+# whole minutes, so nothing here is ever a float.
+# --------------------------------------------------------------------------- #
+
+class TeamTaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    details: Optional[str] = Field(default=None, max_length=5000)
+    assignee_id: Optional[int] = None
+    county_id: Optional[int] = None
+    due_on: Optional[date] = None
+
+
+class TeamTaskPatch(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    details: Optional[str] = Field(default=None, max_length=5000)
+    status: Optional[TeamTaskStatus] = None
+    assignee_id: Optional[int] = None
+    county_id: Optional[int] = None
+    due_on: Optional[date] = None
+
+
+class TeamNoteIn(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class TeamHoursIn(BaseModel):
+    worked_on: date
+    minutes: int = Field(ge=1, le=24 * 60)
+    note: str = Field(min_length=1, max_length=300)
+    task_id: Optional[int] = None
+
+
+class TeamHoursPatch(BaseModel):
+    worked_on: Optional[date] = None
+    minutes: Optional[int] = Field(default=None, ge=1, le=24 * 60)
+    note: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    task_id: Optional[int] = None
+
+
+class TeamRateIn(BaseModel):
+    user_id: int
+    cents_per_hour: int = Field(ge=0, le=100_000_00)
+    effective_on: date
+
+
+class TeamTimesheetIn(BaseModel):
+    starts_on: date
+    ends_on: date
+    note: Optional[str] = Field(default=None, max_length=400)
+
+
+class TeamDecisionIn(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=400)
+
+
+class TeamPaymentIn(BaseModel):
+    paid_on: Optional[date] = None
+    paid_cents: Optional[int] = Field(default=None, ge=0)
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class TeamExpenseIn(BaseModel):
+    spent_on: date
+    vendor: str = Field(min_length=1, max_length=120)
+    amount_cents: int = Field(ge=1, le=1_000_000_00)
+    note: Optional[str] = Field(default=None, max_length=300)
+    paid_by_id: Optional[int] = None          # null: the business paid
+
+
+class TeamExpensePatch(BaseModel):
+    spent_on: Optional[date] = None
+    vendor: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    amount_cents: Optional[int] = Field(default=None, ge=1, le=1_000_000_00)
+    note: Optional[str] = Field(default=None, max_length=300)
+    paid_by_id: Optional[int] = None

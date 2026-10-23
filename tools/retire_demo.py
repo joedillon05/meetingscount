@@ -28,7 +28,7 @@ from app.db import SessionLocal  # noqa: E402
 from app.models import (  # noqa: E402
     AuditLog, CheckIn, Confirmation, Confirmer, County, Dispute, LoginCode, Meeting,
     MeetingSeries, Participant, Program, Requirement, Review, Session as SessionRow, Signup,
-    SmsLog, Subscription, User,
+    SmsLog, Subscription, TeamTask, User,
 )
 
 SEEDED = "Washtenaw County"
@@ -82,6 +82,8 @@ def retire(db, county_name: str, *, dry_run: bool = False) -> dict[str, int]:
 
     # References from rows that stay (directory meetings, other counties'
     # participants) to people who are leaving.
+    # A team task that mentioned this county keeps its text and loses the link.
+    db.execute(update(TeamTask).where(TeamTask.county_id == cid).values(county_id=None))
     if uids:
         db.execute(update(Participant).where(in_users(Participant.officer_id),
                                              Participant.county_id != cid).values(officer_id=None))

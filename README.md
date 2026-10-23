@@ -26,6 +26,7 @@ uvicorn app.main:app --reload
 | `/join` | Someone whose county is not on MeetingsCount: create your own profile, prove the phone with a code, pay on Stripe's page. Open in demo mode, or when Stripe and Twilio are set up |
 | `/confirm/<token>` | The person a participant asked to confirm a check-in: one link from a text, no sign-in |
 | `/ops` | Developer: map of every check-in, and a simulator that needs no phone |
+| `/team` | The founders: tasks, the hours log, timesheets and expenses. Superusers only, inside the staff dashboard |
 | `/docs` | API reference |
 
 Dev auth is on, so there's no login. On `/officer`, pick a staff member from
@@ -34,7 +35,7 @@ participants. Each page remembers its own person, so being Aisha on the phone
 page never changes who you are on the dashboard.
 
 ```bash
-python -m pytest                    # 147 tests
+python -m pytest                    # 172 tests
 ```
 
 ### With Postgres, the way production runs
@@ -213,7 +214,8 @@ app/
   routers/         me (the signed-in person's own record), meetings, checkins,
                    caseload, reviews, reports, admin, confirmations (asks,
                    the public answer page, Twilio webhooks), directory,
-                   signup (/join), billing (Stripe links and its webhook)
+                   signup (/join), billing (Stripe links and its webhook),
+                   team (the founders' tasks, hours, timesheets and expenses)
 tools/import_meetings.py   bring an area's meeting list into the directory
 data/              the meeting lists that ship with the app
 static/
@@ -223,7 +225,7 @@ static/
   join.html        create your own profile and pay for it (app/join.js)
   app/             tokens.css + base.css (shared design system), lib.js
                    (shared helpers), participant.*, officer.js + officer.css,
-                   queue.js (the review queue)
+                   queue.js (the review queue), team.js (the Team page)
   sw.js            service worker: caches the app shell, never API responses
   ops.html         map and simulator
 alembic/           migrations, including Postgres row-level security
@@ -248,6 +250,30 @@ webhooks and by a sync when the person comes back from checkout. Under
 that opens Stripe's portal to change the card or cancel.
 
 Setting it up, and what it costs, is in `DEPLOY.md`.
+
+## The founders' back office
+
+The Team section of the staff dashboard is for the people who run
+ActionsCount+, not for a county. It needs the superuser role, which only
+`tools/make_staff.py` can give, and it never shows up in a county admin's
+audit log. Four things live there:
+
+- **Tasks.** One shared list. A task can be for one of you, have a due date,
+  point at a county, and carry notes. Open, waiting, done.
+- **Hours.** Typed in by hand: a day, a length, what it was, optionally the
+  task. Yours alone to edit, until it is on a timesheet.
+- **Timesheets.** A date range of your unsubmitted hours, priced at the
+  hourly rate in force on each day and frozen at submission. The other
+  founder approves it, or sends it back with a reason (the hours return to
+  the log), then marks it paid once the money has gone. The app records the
+  payment; it never moves money.
+- **Expenses.** What the business cost and who paid. Something paid on a
+  personal card is owed until the other founder marks it paid back.
+
+What the company owes someone is approved-but-unpaid timesheets plus their
+unreimbursed expenses, and it sits at the top of the Money tab. Rates are
+whole cents, time is whole minutes, and every write lands in the audit log.
+`app/routers/team.py` holds the rules; `tests/test_team.py` walks through them.
 
 ## Security posture
 

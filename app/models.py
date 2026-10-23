@@ -14,10 +14,10 @@ in a multi-county system is a data breach.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import (
-    Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text,
+    Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
@@ -99,6 +99,19 @@ class ConfirmationStatus(str, enum.Enum):
     asked = "asked"              # text sent, no answer yet
     confirmed = "confirmed"      # they said they saw the participant there
     declined = "declined"        # they said they could not confirm it
+
+
+class TeamTaskStatus(str, enum.Enum):
+    open = "open"
+    waiting = "waiting"          # blocked on someone outside the team
+    done = "done"
+
+
+class TeamTimesheetStatus(str, enum.Enum):
+    submitted = "submitted"      # waiting for the other founder to approve
+    approved = "approved"        # agreed, not paid yet
+    returned = "returned"        # sent back with a note; its hours are free to resubmit
+    paid = "paid"
 
 
 # --------------------------------------------------------------------------- #
@@ -628,3 +641,133 @@ class AuditLog(Base):
     detail: Mapped[str | None] = mapped_column(String(400))
     ip: Mapped[str | None] = mapped_column(String(64))
     at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+# --------------------------------------------------------------------------- #
+# The company's own back office
+# --------------------------------------------------------------------------- #
+#
+# Everything below is for the people who run ActionsCount+, not for a county.
+# It is read and written only by superusers (see routers/team.py), carries no
+# participant data, and has no county_id of its own, so county row-level
+# security never applies to it. A task may point at a county the way a note
+# might; that is the only link.
+
+class TeamTask(Base):
+    """Something one of us has to do. One list, not a board."""
+    __tablename__ = "team_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    details: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[TeamTaskStatus] = mapped_column(Enum(TeamTaskStatus), default=TeamTaskStatus.open,
+                                                   index=True)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    county_id: Mapped[int | None] = mapped_column(ForeignKey("counties.id"))   # "call Washtenaw back"
+    due_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    done_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
+    notes: Mapped[list[TeamTaskNote]] = relationship(back_populates="task",
+                                                     order_by="TeamTaskNote.created_at")
+
+
+class TeamTaskNote(Base):
+    __tablename__ = "team_task_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("team_tasks.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    task: Mapped[TeamTask] = relationship(back_populates="notes")
+    author: Mapped[User] = relationship()
+
+
+class TeamRate(Base):
+    """
+    What an hour of someone's time is worth, from a date. A new rate is a new
+    row, so a raise never changes what an old timesheet said.
+    """
+    __tablename__ = "team_rates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    cents_per_hour: Mapped[int] = mapped_column(Integer)
+    effective_on: Mapped[date] = mapped_column(Date)
+    set_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class TeamHours(Base):
+    """
+    One entry in the hours log: a day, a length, what it was. Typed in by
+    hand, not timed. Editable until it is on a timesheet.
+    """
+    __tablename__ = "team_hours"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    worked_on: Mapped[date] = mapped_column(Date, index=True)
+    minutes: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(String(300))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("team_tasks.id"))
+    timesheet_id: Mapped[int | None] = mapped_column(ForeignKey("team_timesheets.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    task: Mapped[TeamTask | None] = relationship()
+
+
+class TeamTimesheet(Base):
+    """
+    A span of someone's hours, submitted for the other founder to approve and
+    pay. The hours and the amount are fixed at submission, so the record says
+    what was agreed even if a rate changes later. Approved minus paid is what
+    the company owes.
+    """
+    __tablename__ = "team_timesheets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    starts_on: Mapped[date] = mapped_column(Date)
+    ends_on: Mapped[date] = mapped_column(Date)
+    status: Mapped[TeamTimesheetStatus] = mapped_column(Enum(TeamTimesheetStatus),
+                                                        default=TeamTimesheetStatus.submitted, index=True)
+    minutes: Mapped[int] = mapped_column(Integer)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(400))            # from whoever submitted it
+    submitted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    decision_note: Mapped[str | None] = mapped_column(String(400))   # why it was sent back
+    paid_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    paid_cents: Mapped[int | None] = mapped_column(Integer)
+    paid_note: Mapped[str | None] = mapped_column(String(200))       # how: "Zelle", a check number
+
+    hours: Mapped[list[TeamHours]] = relationship(order_by="TeamHours.worked_on")
+
+
+class TeamExpense(Base):
+    """
+    Money spent on the business: hosting, texting, the domain. `paid_by_id`
+    is null when the business paid; otherwise it is someone's own card, and
+    they are owed it until the other founder marks it reimbursed.
+    """
+    __tablename__ = "team_expenses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    spent_on: Mapped[date] = mapped_column(Date, index=True)
+    vendor: Mapped[str] = mapped_column(String(120))
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(300))
+    paid_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    reimbursed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reimbursed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reimbursed_note: Mapped[str | None] = mapped_column(String(200))
+
+    @property
+    def owed(self) -> bool:
+        """Someone paid this personally and has not been paid back."""
+        return self.paid_by_id is not None and self.reimbursed_at is None

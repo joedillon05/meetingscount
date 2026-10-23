@@ -378,6 +378,12 @@ to boot if either demo switch is turned back on.
    Sign in at `https://actionscountplus.com/officer` and change the password
    before the next step.
 
+   Make one for each founder. The Team section of the dashboard (tasks,
+   the hours log, timesheets, expenses) is for superusers only, and a
+   timesheet or an expense is approved by the other founder, never by the
+   person it pays. Turn on the authenticator app from the account menu:
+   these accounts see every county.
+
 3. **Delete the demo county.** First see what would go, then delete it. The
    meeting directory and the self-pay county are untouched.
 

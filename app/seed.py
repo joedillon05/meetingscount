@@ -26,7 +26,7 @@ from .models import (
     AuditLog, Base, CheckIn, CheckInStatus, Confirmation, ConfirmationStatus, Confirmer, County,
     Dispute, Meeting, MeetingCategory, MeetingSeries, MeetingSource, Participant, Program,
     Requirement, RequirementPeriod, Review, ReviewDecision, Role, Signup, SmsLog, SmsOptOut,
-    Subscription, User,
+    Subscription, TeamExpense, TeamHours, TeamRate, TeamTask, TeamTaskNote, TeamTimesheet, User,
 )
 from .routers.auth import DEMO_PASSWORD
 from .security import hash_password
@@ -84,7 +84,8 @@ def _wipe(db) -> None:
             db.execute(MeetingSeries.__table__.insert(), kept)
             db.commit()
         return
-    for model in (AuditLog, SmsLog, SmsOptOut, Confirmation, Confirmer, Review, Dispute,
+    for model in (TeamTaskNote, TeamHours, TeamTimesheet, TeamTask, TeamRate, TeamExpense,
+                  AuditLog, SmsLog, SmsOptOut, Confirmation, Confirmer, Review, Dispute,
                   CheckIn, Requirement, Meeting, Subscription, Signup, Participant, User,
                   Program, County):
         db.execute(delete(model))

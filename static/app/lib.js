@@ -292,6 +292,7 @@ const PATHS = {
   back: '<path d="M15 5l-7 7 7 7"/>',
   file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
   map: '<path d="M9 4.5l6 2.5 5.5-2.2v14.7L15 21.7l-6-2.5-5.5 2.2V6.7z"/><path d="M9 4.5v14.7M15 7v14.7"/>',
+  briefcase: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M8.5 7.5V5.8A1.8 1.8 0 0 1 10.3 4h3.4a1.8 1.8 0 0 1 1.8 1.8v1.7M3 12.5h18"/>',
 };
 export function icon(name, cls = '') {
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"

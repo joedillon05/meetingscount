@@ -7,6 +7,7 @@ ActionsCount+ API.
     /join          create your own profile and pay for it
     /officer       officer dashboard: caseload, review queue, participant detail
     /ops           map, simulator, engine internals (developer tool)
+    /team          the founders' own tasks, hours, timesheets and expenses
     /docs          API reference
 
 Two switches govern safety, both ON for local development and both of which
@@ -36,7 +37,7 @@ from .config import settings
 from .db import create_all
 from .routers import (
     admin, auth, billing, caseload, checkins, confirmations, directory, me, meetings, reports,
-    reviews, sharing, signup,
+    reviews, sharing, signup, team,
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -94,7 +95,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 for r in (auth.router, me.router, meetings.router, checkins.router, caseload.router,
           reviews.router, reports.router, admin.router, confirmations.router,
-          directory.router, signup.router, billing.router, sharing.router):
+          directory.router, signup.router, billing.router, sharing.router, team.router):
     app.include_router(r)
 
 
@@ -201,6 +202,12 @@ def ops():
 def admin_redirect():
     # The old URL from v2. Keep it working.
     return FileResponse(os.path.join(STATIC_DIR, "officer.html"))
+
+
+@app.get("/team", include_in_schema=False)
+def team_page():
+    """The founders' back office lives inside the staff dashboard, superusers only."""
+    return RedirectResponse("/officer#team", status_code=302)
 
 
 @app.get("/join", include_in_schema=False)
