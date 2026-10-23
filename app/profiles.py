@@ -75,6 +75,11 @@ def _columns(headers: list[str]) -> dict[str, str]:
             for field_, keys in COLUMNS.items()}
 
 
+def _cased(word: str) -> str:
+    """A name typed in all lowercase gets its capital; anything else is left as typed."""
+    return word.capitalize() if word.islower() else word
+
+
 def _date(value: str) -> datetime | None:
     v = (value or "").strip()
     if not v:
@@ -104,12 +109,17 @@ class ImportReport:
         return "\n".join(lines)
 
 
-def import_people(db: Session, rows: list[dict], *, covered: bool = False) -> ImportReport:
+def import_people(db: Session, rows: list[dict], *, covered: bool = False,
+                  stripe: bool = False) -> ImportReport:
     """
     One profile per row with a name and a usable mobile number. A number that
     already has an account is left alone, so running the same list twice is
     harmless. `covered` marks everyone in this list as needing no payment, for
-    people who already paid on the old site. The caller commits.
+    people who already paid on the old site. `stripe` looks each person up in
+    Stripe, by email and then by phone, and keeps the subscription they
+    already pay for; someone Stripe does not know is left out, so the list
+    can be run again once Stripe is put right, unless `covered` says to bring
+    them in with no payment asked. The caller commits.
     """
     report = ImportReport()
     if not rows:
@@ -121,7 +131,7 @@ def import_people(db: Session, rows: list[dict], *, covered: bool = False) -> Im
     seen: set[str] = set()
     for i, r in enumerate(rows, start=2):                    # row 1 is the header
         get = lambda f: str(r.get(cols[f]) or "").strip() if cols[f] else ""   # noqa: E731
-        name = " ".join((get("name") or f"{get('first')} {get('last')}").split())[:120]
+        name = " ".join(_cased(w) for w in (get("name") or f"{get('first')} {get('last')}").split())[:120]
         phone = normalize_phone(get("phone"))
         if len(name) < 2:
             report.skipped.append(f"row {i}: no name")
@@ -133,23 +143,59 @@ def import_people(db: Session, rows: list[dict], *, covered: bool = False) -> Im
             report.skipped.append(f"row {i}: {name}, same number as an earlier row")
             continue
         seen.add(phone)
+        email = (get("email") or None) and get("email")[:200]
         existing = db.scalar(select(User).where(User.phone == phone, User.role == Role.participant))
         if existing is not None:
-            report.already.append(f"{name} (has an account as {existing.name})")
+            note = f"{name} (has an account as {existing.name})"
+            linked = _link_existing(db, existing, email, phone) if stripe else None
+            report.already.append(f"{note}, {linked}" if linked else note)
             continue
         try:
             per_week = max(1, min(21, int(float(get("per_week") or DEFAULT_PER_WEEK))))
         except ValueError:
             per_week = DEFAULT_PER_WEEK
-        email = get("email") or None
         starts_on = _date(get("start")) or datetime.now(timezone.utc)
         ends_on = _date(get("end"))
         if ends_on is not None and ends_on <= starts_on:
             ends_on = None                                   # a typo in the sheet, not a one-day order
-        user = make_profile(db, name=name, phone=phone, email=email[:200] if email else None,
-                            per_week=per_week, starts_on=starts_on, ends_on=ends_on,
+        match = billing.match_existing(email, phone) if stripe else None
+        if match is not None:
+            holder = billing.taken_by(db, match)
+            if holder is not None:
+                owner = db.get(User, holder.user_id)
+                report.skipped.append(f"row {i}: {name}, their Stripe customer already belongs to "
+                                      f"{owner.name if owner else 'another account'}")
+                continue
+        if stripe and (match is None or match.subscription is None) and not covered:
+            report.skipped.append(f"row {i}: {name}, no subscription on Stripe under "
+                                  f"{email or phone}; fix it there and run again, or add --covered")
+            continue
+        user = make_profile(db, name=name, phone=phone, email=email, per_week=per_week,
+                            starts_on=starts_on, ends_on=ends_on,
                             order_reference="moved from the old site",
                             status="covered" if covered else None)
-        report.created.append(f"{name}, {per_week} a week")
+        words = f"{name}, {per_week} a week"
+        if match is not None:
+            billing.adopt(db, billing.row_for(db, user), match)
+            words += f", {match.words}"
+        elif stripe:
+            words += ", covered, nothing on Stripe"
+        report.created.append(words)
         report.new_users.append(user.id)
     return report
+
+
+def _link_existing(db: Session, user: User, email: str | None, phone: str) -> str | None:
+    """
+    An account made before Stripe linking existed, or on a run without it:
+    attach the customer it is missing. Returns a few words for the report, or
+    None when there was nothing to do.
+    """
+    row = billing.row_for(db, user)
+    if row is None or row.stripe_customer_id:
+        return None
+    match = billing.match_existing(email or user.email, phone)
+    if match is None or billing.taken_by(db, match) is not None:
+        return None
+    billing.adopt(db, row, match)
+    return f"now linked: {match.words}"

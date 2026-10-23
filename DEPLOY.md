@@ -246,6 +246,17 @@ A number that already has an account is left alone, so the same list can be
 run again. Delete the file from `/data` afterwards: it is a list of names
 and phone numbers.
 
+People who pay through Stripe already, because the old site used this same
+Stripe account, come over with `--stripe` instead of `--covered`. Each one is
+looked up in Stripe by email, then by phone, and the subscription they have
+there is copied onto their profile: they are not asked for a card again, the
+billing portal works for them, and Stripe's webhooks keep their standing
+current from then on. Nothing is written to Stripe. Someone Stripe does not
+know under that email or number is left out, with a note saying so, so you can
+fix the email in Stripe and run the list again; `--stripe --covered` together
+brings those people in with no payment asked. The dry run shows who matched
+before anything is saved.
+
 ## The meeting directory
 
 `fly.toml` names `MC_DIRECTORY_FILE`, and the container imports that list

@@ -21,7 +21,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -349,7 +351,13 @@ def sync_checkout(db: Session, user: User, session_id: str) -> Subscription:
 
 
 def apply_subscription(db: Session, row: Subscription, sub: dict, *, event_id: str | None = None) -> None:
-    """Copy what matters from a Stripe subscription object onto the row."""
+    """Copy what matters from a Stripe subscription object onto the row, and commit."""
+    copy_subscription(row, sub, event_id=event_id)
+    db.commit()
+
+
+def copy_subscription(row: Subscription, sub: dict, *, event_id: str | None = None) -> None:
+    """The copy itself, with no commit, for a caller that decides later whether to keep it."""
     row.stripe_subscription_id = sub.get("id") or row.stripe_subscription_id
     row.status = (sub.get("status") or row.status)[:24]
     row.cancel_at_period_end = bool(sub.get("cancel_at_period_end"))
@@ -363,7 +371,6 @@ def apply_subscription(db: Session, row: Subscription, sub: dict, *, event_id: s
     if event_id:
         row.last_event_id = event_id
     row.updated_at = datetime.now(timezone.utc)
-    db.commit()
 
 
 def _id(obj: Any) -> str | None:
@@ -371,6 +378,111 @@ def _id(obj: Any) -> str | None:
     if isinstance(obj, dict):
         return obj.get("id")
     return obj or None
+
+
+# --------------------------------------------------------------------------- #
+# People who already pay here
+# --------------------------------------------------------------------------- #
+# The old site took its payments in this same Stripe account, so someone
+# moving over usually has a customer and a subscription there already. The
+# importer finds them by email, or failing that by phone, and copies that
+# subscription onto their row instead of asking for a card a second time.
+# Nothing here writes to Stripe.
+
+STANDING = ("active", "trialing", "past_due", "paused", "unpaid", "incomplete",
+            "canceled", "incomplete_expired")        # best first, for choosing among several
+
+
+@dataclass
+class Match:
+    customer: dict
+    subscription: dict | None       # the customer's best one, if they have any
+    others: int = 0                 # how many more customers matched; usually none
+
+    @property
+    def words(self) -> str:
+        who = self.customer.get("email") or self.customer.get("phone") or self.customer["id"]
+        standing = self.subscription.get("status") if self.subscription else "no subscription"
+        more = (f", {self.others} more customer{'s' if self.others > 1 else ''} matched too"
+                if self.others else "")
+        return f"Stripe {standing} ({who}{more})"
+
+
+def _search_quote(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def find_customers(email: str | None, phone: str | None) -> list[dict]:
+    """
+    Stripe customers with this email, or failing that with this phone number.
+    Stripe's email filter is exact and case-sensitive, so the email is tried
+    as written and lowercased, then through search. Phones are stored however
+    whoever typed them did, so a few shapes are tried and the digits compared.
+    """
+    c = get_client()
+    found: dict[str, dict] = {}
+    email = (email or "").strip()
+    if email:
+        for e in dict.fromkeys((email, email.lower())):
+            for cust in c.get("/v1/customers", {"email": e, "limit": "100"}).get("data") or []:
+                found[cust["id"]] = cust
+        if not found:
+            query = f"email:'{_search_quote(email.lower())}'"
+            for cust in c.get("/v1/customers/search", {"query": query, "limit": "100"}).get("data") or []:
+                found[cust["id"]] = cust
+    digits = re.sub(r"\D", "", phone or "")[-10:]
+    if not found and len(digits) == 10:
+        shapes = (digits, f"{digits[:3]}-{digits[3:6]}-{digits[6:]}",
+                  f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+        for shape in shapes:
+            hits = c.get("/v1/customers/search", {"query": f"phone~'{shape}'", "limit": "100"})
+            for cust in hits.get("data") or []:
+                if re.sub(r"\D", "", cust.get("phone") or "")[-10:] == digits:
+                    found[cust["id"]] = cust
+            if found:
+                break
+    return list(found.values())
+
+
+def _rank(sub: dict | None) -> tuple[int, int]:
+    """Live subscriptions first, then the newest."""
+    if sub is None:
+        return (len(STANDING) + 1, 0)
+    standing = sub.get("status") or ""
+    return (STANDING.index(standing) if standing in STANDING else len(STANDING),
+            -int(sub.get("created") or 0))
+
+
+def match_existing(email: str | None, phone: str | None) -> Match | None:
+    """The Stripe customer this person already is, with their best subscription, or None."""
+    customers = find_customers(email, phone)
+    if not customers:
+        return None
+    best: tuple[dict, dict | None] | None = None
+    for cust in customers:
+        subs = get_client().get("/v1/subscriptions", {"customer": cust["id"], "status": "all",
+                                                       "limit": "100"}).get("data") or []
+        sub = min(subs, key=_rank) if subs else None
+        if best is None or _rank(sub) < _rank(best[1]):
+            best = (cust, sub)
+    return Match(customer=best[0], subscription=best[1], others=len(customers) - 1)
+
+
+def taken_by(db: Session, match: Match) -> Subscription | None:
+    """The row, if any, that already holds this customer or subscription: both ids are unique."""
+    row = _row_by_customer(db, match.customer["id"])
+    if row is None and match.subscription:
+        row = db.scalar(select(Subscription).where(
+            Subscription.stripe_subscription_id == match.subscription["id"]))
+    return row
+
+
+def adopt(db: Session, row: Subscription, match: Match) -> None:
+    """Record someone's existing Stripe customer and subscription on their row. No commit."""
+    row.stripe_customer_id = match.customer["id"]
+    if match.subscription:
+        copy_subscription(row, match.subscription)
+    row.updated_at = datetime.now(timezone.utc)
 
 
 # --------------------------------------------------------------------------- #

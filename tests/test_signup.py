@@ -92,7 +92,33 @@ class FakeStripe:
             if not sub:
                 raise billing.StripeError("No such subscription", status=404)
             return sub
+        if path == "/v1/subscriptions":
+            cid = (params or {}).get("customer")
+            return {"data": [s for s in self.subscriptions.values() if s["customer"] == cid]}
+        if path == "/v1/customers":                         # Stripe's filter: exact, case-sensitive
+            want = (params or {}).get("email")
+            return {"data": [c for c in self.customers.values() if want and c.get("email") == want]}
+        if path == "/v1/customers/search":
+            m = re.fullmatch(r"(email|phone)(:|~)'(.*)'", (params or {}).get("query", ""))
+            assert m, f"a search query this fake does not know: {params}"
+            field_, op, value = m.groups()
+            hit = lambda c: ((c.get(field_) or "").lower() == value.lower() if op == ":"  # noqa: E731
+                             else value in (c.get(field_) or ""))
+            return {"data": [c for c in self.customers.values() if hit(c)]}
         raise billing.StripeError(f"unexpected GET {path}", status=404)
+
+    # A customer the old site made, with the subscription they pay for there.
+    def old_site_customer(self, *, email=None, phone=None, status="active", days=12, name="Someone"):
+        cid = "cus_" + secrets.token_hex(4)
+        self.customers[cid] = {"id": cid, "email": email, "phone": phone, "name": name}
+        if status:
+            sub_id = "sub_" + secrets.token_hex(4)
+            self.subscriptions[sub_id] = {
+                "id": sub_id, "object": "subscription", "customer": cid, "status": status,
+                "cancel_at_period_end": False, "created": int(time.time()) - 200 * 86400,
+                "items": {"data": [{"price": {"id": "price_old"},
+                                    "current_period_end": int(time.time()) + days * 86400}]}}
+        return cid
 
     # What happens on Stripe's own pages.
     def pay(self, session_id, status="active", days=30):
