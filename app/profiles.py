@@ -167,8 +167,10 @@ def import_people(db: Session, rows: list[dict], *, covered: bool = False,
                                       f"{owner.name if owner else 'another account'}")
                 continue
         if stripe and (match is None or match.subscription is None) and not covered:
-            report.skipped.append(f"row {i}: {name}, no subscription on Stripe under "
-                                  f"{email or phone}; fix it there and run again, or add --covered")
+            why = (f"nobody on Stripe under {email or phone}" if match is None
+                   else f"{match.words} and no subscription")
+            report.skipped.append(f"row {i}: {name}, {why}; fix it there and run again, "
+                                  "or add --covered")
             continue
         user = make_profile(db, name=name, phone=phone, email=email, per_week=per_week,
                             starts_on=starts_on, ends_on=ends_on,

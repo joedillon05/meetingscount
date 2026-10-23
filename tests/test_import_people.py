@@ -111,6 +111,8 @@ STRIPE_ROWS = [
      "Email": "gus@example.com"},
     {"First Name": "Dana", "Last Name": "Twin", "Cell Phone": "734-555-0198",
      "Email": "dana.pays@example.com"},                     # a second person on Dana's email
+    {"First Name": "Ivy", "Last Name": "NeverPaid", "Cell Phone": "734-555-0199",
+     "Email": "ivy@example.com"},                           # a customer with no subscription
 ]
 
 
@@ -133,12 +135,16 @@ def test_people_who_already_pay_on_stripe_keep_their_subscription(stripe):
     dana = stripe.old_site_customer(email="dana.pays@example.com", status="active", days=12)
     stripe.old_site_customer(phone="(734) 555-0194", status="trialing")
     stripe.old_site_customer(email="fay@example.com", status="canceled")
+    stripe.old_site_customer(email="ivy@example.com", status=None)
     db = SessionLocal()
     try:
         report = profiles.import_people(db, STRIPE_ROWS, stripe=True)
         db.commit()
         assert [x.split(",")[0] for x in report.created] == ["Dana Pays", "Eli ByPhone", "Fay Lapsed"]
-        assert any("Gus Unknown" in x and "no subscription on Stripe" in x for x in report.skipped)
+        assert any("Gus Unknown" in x and "nobody on Stripe under gus@example.com" in x
+                   for x in report.skipped)
+        assert any("Ivy NeverPaid" in x and "(ivy@example.com) and no subscription" in x
+                   for x in report.skipped), "found there, but nothing to copy"
         assert any("Dana Twin" in x and "already belongs to Dana Pays" in x for x in report.skipped)
         assert by_phone(db, "+17345550196") is None, "not made until Stripe knows them"
         assert by_phone(db, "+17345550198") is None
@@ -158,10 +164,12 @@ def test_people_who_already_pay_on_stripe_keep_their_subscription(stripe):
         # nobody is linked twice, and Dana's twin is still refused.
         again = profiles.import_people(db, STRIPE_ROWS, stripe=True, covered=True)
         db.commit()
-        assert [x.split(",")[0] for x in again.created] == ["Gus Unknown"]
+        assert [x.split(",")[0] for x in again.created] == ["Gus Unknown", "Ivy NeverPaid"]
         assert len(again.already) == 3 and not any("now linked" in x for x in again.already)
         gus = billing.row_for(db, by_phone(db, "+17345550196"))
         assert gus.status == "covered" and gus.stripe_customer_id is None
+        ivy = billing.row_for(db, by_phone(db, "+17345550199"))
+        assert ivy.status == "covered" and ivy.stripe_customer_id, "linked, so a later checkout reuses it"
     finally:
         db.close()
 
