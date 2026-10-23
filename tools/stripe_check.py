@@ -18,7 +18,10 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Next to this file in the repo, or the working directory when the script
+# was copied to the machine's /data and run from /srv.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT if os.path.isdir(os.path.join(_ROOT, "app")) else os.getcwd())
 
 from app import billing, directory  # noqa: E402
 from app.config import settings  # noqa: E402
