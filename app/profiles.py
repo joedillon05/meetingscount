@@ -80,6 +80,31 @@ def _cased(word: str) -> str:
     return word.capitalize() if word.islower() else word
 
 
+@dataclass
+class Listed:
+    """One row of a people list, as the tools that look people up elsewhere need it."""
+    row: int
+    name: str
+    email: str | None
+    phone: str | None
+
+
+def listed_people(rows: list[dict]) -> list[Listed]:
+    """Each row's name, email and normalized phone. Raises ValueError without the needed columns."""
+    if not rows:
+        return []
+    cols = _columns(list(rows[0].keys()))
+    if not cols["phone"] or not (cols["name"] or cols["first"]):
+        raise ValueError("The list needs a name column (or first and last name) and a phone column. "
+                         f"Found: {', '.join(rows[0].keys())}")
+    out = []
+    for i, r in enumerate(rows, start=2):
+        get = lambda f: str(r.get(cols[f]) or "").strip() if cols[f] else ""   # noqa: E731
+        name = " ".join(_cased(w) for w in (get("name") or f"{get('first')} {get('last')}").split())[:120]
+        out.append(Listed(i, name, get("email")[:200] or None, normalize_phone(get("phone"))))
+    return out
+
+
 def _date(value: str) -> datetime | None:
     v = (value or "").strip()
     if not v:

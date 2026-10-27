@@ -364,13 +364,18 @@ def copy_subscription(row: Subscription, sub: dict, *, event_id: str | None = No
     items = ((sub.get("items") or {}).get("data") or [{}])
     price = (items[0].get("price") or {}) if items else {}
     row.price_id = _id(price) or row.price_id
-    # Older API versions put the period on the subscription, newer ones on
-    # each item. Read whichever is there.
-    end = sub.get("current_period_end") or (items[0].get("current_period_end") if items else None)
-    row.current_period_end = datetime.fromtimestamp(int(end), tz=timezone.utc) if end else None
+    row.current_period_end = period_end(sub)
     if event_id:
         row.last_event_id = event_id
     row.updated_at = datetime.now(timezone.utc)
+
+
+def period_end(sub: dict) -> datetime | None:
+    """When the paid period ends. Older API versions put it on the
+    subscription, newer ones on each item; read whichever is there."""
+    items = (sub.get("items") or {}).get("data") or []
+    end = sub.get("current_period_end") or (items[0].get("current_period_end") if items else None)
+    return datetime.fromtimestamp(int(end), tz=timezone.utc) if end else None
 
 
 def _id(obj: Any) -> str | None:
@@ -412,14 +417,15 @@ def _search_quote(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def find_customers(email: str | None, phone: str | None) -> list[dict]:
+def find_customers(email: str | None, phone: str | None, client: Client | None = None) -> list[dict]:
     """
     Stripe customers with this email, or failing that with this phone number.
     Stripe's email filter is exact and case-sensitive, so the email is tried
     as written and lowercased, then through search. Phones are stored however
     whoever typed them did, so a few shapes are tried and the digits compared.
+    `client` is for looking in another Stripe account, as the migration tools do.
     """
-    c = get_client()
+    c = client or get_client()
     found: dict[str, dict] = {}
     email = (email or "").strip()
     if email:
@@ -453,16 +459,22 @@ def _rank(sub: dict | None) -> tuple[int, int]:
             -int(sub.get("created") or 0))
 
 
-def match_existing(email: str | None, phone: str | None) -> Match | None:
+def best_subscription(customer_id: str, client: Client | None = None) -> dict | None:
+    """A customer's subscription that matters most: a live one first, then the newest."""
+    c = client or get_client()
+    subs = c.get("/v1/subscriptions", {"customer": customer_id, "status": "all",
+                                       "limit": "100"}).get("data") or []
+    return min(subs, key=_rank) if subs else None
+
+
+def match_existing(email: str | None, phone: str | None, client: Client | None = None) -> Match | None:
     """The Stripe customer this person already is, with their best subscription, or None."""
-    customers = find_customers(email, phone)
+    customers = find_customers(email, phone, client)
     if not customers:
         return None
     best: tuple[dict, dict | None] | None = None
     for cust in customers:
-        subs = get_client().get("/v1/subscriptions", {"customer": cust["id"], "status": "all",
-                                                       "limit": "100"}).get("data") or []
-        sub = min(subs, key=_rank) if subs else None
+        sub = best_subscription(cust["id"], client)
         if best is None or _rank(sub) < _rank(best[1]):
             best = (cust, sub)
     return Match(customer=best[0], subscription=best[1], others=len(customers) - 1)

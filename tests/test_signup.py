@@ -36,8 +36,11 @@ def fresh_phone() -> str:
 class FakeStripe:
     """Stands in for Stripe's API. Only the calls the app makes exist here."""
 
-    def __init__(self):
+    def __init__(self, name="Test account"):
         self.customers, self.subscriptions, self.sessions, self.calls = {}, {}, {}, []
+        self.cards, self.prices, self.idempotent = {}, {}, {}
+        self.account = {"id": "acct_" + secrets.token_hex(4), "email": "owner@example.com",
+                        "business_profile": {"name": name}}
         self.refuse = None            # an error to raise instead of answering
         # Promotion codes made in the dashboard: a free year for demos, and
         # one that has been used up.
@@ -67,6 +70,41 @@ class FakeStripe:
         if path == "/v1/billing_portal/sessions":
             return {"customer": data["customer"], "return_url": data["return_url"],
                     "url": f"https://billing.stripe.com/p/session/{secrets.token_hex(4)}"}
+        if path.startswith("/v1/customers/"):                # update: the default card
+            c = self.customers.get(path.rsplit("/", 1)[1])
+            if not c:
+                raise billing.StripeError("No such customer", status=404, code="resource_missing")
+            if "invoice_settings[default_payment_method]" in data:
+                c["invoice_settings"] = {"default_payment_method": data["invoice_settings[default_payment_method]"]}
+            if "default_source" in data:
+                c["default_source"] = data["default_source"]
+            return c
+        if path == "/v1/subscriptions":                      # create, as the mover does
+            if idempotency_key and idempotency_key in self.idempotent:
+                return self.idempotent[idempotency_key]
+            if data["customer"] not in self.customers:
+                raise billing.StripeError("No such customer", status=404, code="resource_missing")
+            now, trial_end = int(time.time()), int(data.get("trial_end") or 0)
+            if trial_end and trial_end <= now:
+                raise billing.StripeError("trial_end must be in the future", status=400)
+            sub_id = "sub_" + secrets.token_hex(4)
+            sub = {"id": sub_id, "object": "subscription", "customer": data["customer"],
+                   "status": "trialing" if trial_end else "active", "cancel_at_period_end": False,
+                   "created": now, "trial_end": trial_end or None,
+                   "metadata": {k[9:-1]: v for k, v in data.items() if k.startswith("metadata[")},
+                   "items": {"data": [{"price": {"id": data["items[0][price]"]},
+                                       "current_period_end": trial_end or now + 30 * 86400}]}}
+            self.subscriptions[sub_id] = sub
+            if idempotency_key:
+                self.idempotent[idempotency_key] = sub
+            return sub
+        if path.startswith("/v1/subscriptions/"):            # update: cancel at period end
+            sub = self.subscriptions.get(path.rsplit("/", 1)[1])
+            if not sub:
+                raise billing.StripeError("No such subscription", status=404)
+            if "cancel_at_period_end" in data:
+                sub["cancel_at_period_end"] = data["cancel_at_period_end"] == "true"
+            return sub
         raise billing.StripeError(f"unexpected POST {path}", status=404)
 
     def get(self, path, params=None):
@@ -74,8 +112,19 @@ class FakeStripe:
         if self.refuse:
             raise billing.StripeError(self.refuse, status=500)
         if path.startswith("/v1/prices/"):
-            return {"id": path.rsplit("/", 1)[1], "unit_amount": 1200, "currency": "usd",
+            pid = path.rsplit("/", 1)[1]
+            return {"id": pid, "unit_amount": self.prices.get(pid, 1200), "currency": "usd",
                     "recurring": {"interval": "month", "interval_count": 1}}
+        if path == "/v1/account":
+            return dict(self.account)
+        if path == "/v1/payment_methods":
+            cid = (params or {}).get("customer")
+            return {"data": [pm for pm in self.cards.values() if pm["customer"] == cid]}
+        if path.startswith("/v1/payment_methods/"):
+            pm = self.cards.get(path.rsplit("/", 1)[1])
+            if not pm:
+                raise billing.StripeError("No such payment method", status=404)
+            return pm
         if path == "/v1/promotion_codes":
             p = self.promotions.get((params or {}).get("code", "").upper())
             return {"data": [p] if p else []}
@@ -93,32 +142,57 @@ class FakeStripe:
                 raise billing.StripeError("No such subscription", status=404)
             return sub
         if path == "/v1/subscriptions":
-            cid = (params or {}).get("customer")
-            return {"data": [s for s in self.subscriptions.values() if s["customer"] == cid]}
+            cid, status = (params or {}).get("customer"), (params or {}).get("status", "all")
+            return {"data": [s for s in self.subscriptions.values()
+                             if (not cid or s["customer"] == cid)
+                             and (status == "all" or s["status"] == status)]}
         if path == "/v1/customers":                         # Stripe's filter: exact, case-sensitive
             want = (params or {}).get("email")
             return {"data": [c for c in self.customers.values() if want and c.get("email") == want]}
         if path == "/v1/customers/search":
-            m = re.fullmatch(r"(email|phone)(:|~)'(.*)'", (params or {}).get("query", ""))
+            m = re.fullmatch(r"(email|phone|name)(:|~)'(.*)'", (params or {}).get("query", ""))
             assert m, f"a search query this fake does not know: {params}"
             field_, op, value = m.groups()
             hit = lambda c: ((c.get(field_) or "").lower() == value.lower() if op == ":"  # noqa: E731
-                             else value in (c.get(field_) or ""))
+                             else value.lower() in (c.get(field_) or "").lower())
             return {"data": [c for c in self.customers.values() if hit(c)]}
+        if path.startswith("/v1/customers/"):
+            c = self.customers.get(path.rsplit("/", 1)[1])
+            if not c:
+                raise billing.StripeError("No such customer", status=404, code="resource_missing")
+            return c
         raise billing.StripeError(f"unexpected GET {path}", status=404)
 
-    # A customer the old site made, with the subscription they pay for there.
-    def old_site_customer(self, *, email=None, phone=None, status="active", days=12, name="Someone"):
+    # A customer the old site made, with the subscription they pay for there
+    # and, when `card` is given as (brand, last4, exp_month, exp_year), the card.
+    def old_site_customer(self, *, email=None, phone=None, status="active", days=12, name="Someone",
+                          card=None, price="price_old"):
         cid = "cus_" + secrets.token_hex(4)
         self.customers[cid] = {"id": cid, "email": email, "phone": phone, "name": name}
+        if card:
+            pm_id = "pm_" + secrets.token_hex(4)
+            self.cards[pm_id] = {"id": pm_id, "object": "payment_method", "customer": cid, "type": "card",
+                                 "card": {"brand": card[0], "last4": card[1], "exp_month": card[2],
+                                          "exp_year": card[3]}}
+            self.customers[cid]["invoice_settings"] = {"default_payment_method": pm_id}
         if status:
             sub_id = "sub_" + secrets.token_hex(4)
             self.subscriptions[sub_id] = {
                 "id": sub_id, "object": "subscription", "customer": cid, "status": status,
                 "cancel_at_period_end": False, "created": int(time.time()) - 200 * 86400,
-                "items": {"data": [{"price": {"id": "price_old"},
+                "items": {"data": [{"price": {"id": price},
                                     "current_period_end": int(time.time()) + days * 86400}]}}
         return cid
+
+    # What Stripe's Dashboard copy does: the same customer ids appear in the
+    # other account, cards come along under new ids, and nothing else does.
+    def copy_customers_to(self, other, ids):
+        for cid in ids:
+            c = {k: v for k, v in self.customers[cid].items() if k not in ("invoice_settings", "default_source")}
+            other.customers.setdefault(cid, c)
+            for pm in [p for p in self.cards.values() if p["customer"] == cid]:
+                new_id = "pm_" + secrets.token_hex(4)
+                other.cards[new_id] = dict(pm, id=new_id)
 
     # What happens on Stripe's own pages.
     def pay(self, session_id, status="active", days=30):

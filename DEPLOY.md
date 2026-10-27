@@ -257,6 +257,51 @@ fix the email in Stripe and run the list again; `--stripe --covered` together
 brings those people in with no payment asked. The dry run shows who matched
 before anything is saved.
 
+### Moving people from another Stripe account
+
+When the old site billed through a different Stripe account, their
+subscriptions cannot be moved: Stripe copies customers and their cards
+between accounts, and the subscriptions are started again here. Four steps.
+The first and third run in your own terminal with the keys exported there,
+for that terminal only, never in a file or a chat.
+
+1. See what the old account holds for the list, and write the file the
+   Dashboard copy takes:
+
+   ```bash
+   export OLD_STRIPE_KEY=sk_live_...
+   python tools/stripe_old_account.py Participants.xlsx --csv old-customers.csv
+   ```
+
+   Check anyone "matched by NAME only", and anyone paying there who is not
+   on the list. If the old price differs from the new one, decide now whether
+   these people keep it: a matching price can be made on the new account and
+   passed to step 3 with `--price`.
+
+2. In the old account's Dashboard, as its owner: Customers, **Copy
+   customers**, **Upload from file**, choose `old-customers.csv`, enter the
+   new account's id (`acct_...`, under the new account's user settings),
+   Confirm. Then in the new account's Dashboard: Customers, **View request**,
+   Accept. A copy this size finishes within hours, at most 72. Customer ids
+   stay the same; cards get new ids. Subscriptions do not come across.
+
+3. Start the subscriptions here, timed to the old ones:
+
+   ```bash
+   export MC_STRIPE_SECRET_KEY=sk_live_... MC_STRIPE_PRICE_ID=price_...
+   python tools/stripe_move_subscriptions.py Participants.xlsx          # the plan, nothing done
+   python tools/stripe_move_subscriptions.py Participants.xlsx --yes
+   ```
+
+   Each person gets a subscription on the new account that is free until the
+   day their old paid period ends, with the copied card as their default, and
+   the old subscription is set to stop that same day. Nobody is charged twice
+   and nobody is charged today. Anyone left alone is named with the reason;
+   fix it and run the list again. Running it twice makes nothing twice.
+
+4. Link the app: `import_people.py ... --stripe --yes` on the machine, as
+   above. People imported earlier as covered are linked by the same run.
+
 ## The meeting directory
 
 `fly.toml` names `MC_DIRECTORY_FILE`, and the container imports that list
