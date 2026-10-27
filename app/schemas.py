@@ -279,7 +279,9 @@ class TeamHoursPatch(BaseModel):
 
 class TeamRateIn(BaseModel):
     user_id: int
-    cents_per_hour: int = Field(ge=0, le=100_000_00)
+    cents_per_hour: int = Field(ge=0, le=100_000_00)                 # cash
+    equity_cents_per_hour: int = Field(default=0, ge=0, le=100_000_00)
+    valuation_cents: Optional[int] = Field(default=None, ge=0, le=10_000_000_000_00)
     effective_on: date
 
 

@@ -273,10 +273,18 @@ audit log. Four things live there:
 - **Expenses.** What the business cost and who paid. Something paid on a
   personal card is owed until the other founder marks it paid back.
 
-What the company owes someone is approved-but-unpaid timesheets plus their
-unreimbursed expenses, and it sits at the top of the Money tab. Rates are
-whole cents, time is whole minutes, and every write lands in the audit log.
-`app/routers/team.py` holds the rules; `tests/test_team.py` walks through them.
+A rate has a cash side and, if the arrangement includes one, an equity side
+measured against the company valuation in force from that date. Equity
+accrues per hour, and a dollar of it is worth the share of the company it
+bought on the day it was earned, so a later valuation never rewrites what
+came before. What the company owes someone is cash earned less cash paid,
+plus their unreimbursed expenses, and it sits at the top of the Money tab
+with the equity total and the share it comes to. Rates are whole cents,
+time is whole minutes, totals are rounded once, and every write lands in
+the audit log. `app/routers/team.py` holds the rules; `tests/test_team.py`
+walks through them. `tools/import_hours.py` brings a spreadsheet of hours
+into an empty log, with the rates and the payments already made, for the
+one time a founder's history predates the page.
 
 ## Security posture
 

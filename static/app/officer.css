@@ -350,6 +350,8 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .owed .tv.ok { color: var(--ok); }
 .kv.bal { font-size: 14px; gap: 6px 16px; }
 .kv.bal dd { font-weight: 600; font-variant-numeric: tabular-nums; }
+.kv.bal.flow { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); }
+.kv.bal.flow dd { font-weight: 500; }
 .notes { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; display: grid; gap: 8px; }
 .notes h3 { font-size: 14px; }
 .notes .tl { margin: 0; }

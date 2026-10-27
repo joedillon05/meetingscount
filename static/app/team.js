@@ -232,14 +232,15 @@ async function drawHours() {
         ${mine && free.length ? `<button class="btn secondary small-btn" data-submit type="button">${icon('file')} Submit a timesheet</button>` : ''}
       </div>
       <div class="table-wrap"><table class="grid">
-        <thead><tr><th>Day</th><th>Hours</th><th>What</th><th>Task</th><th>Worth</th><th>Timesheet</th><th></th></tr></thead>
+        <thead><tr><th>Day</th><th>Hours</th><th>What</th><th>Task</th><th>Cash</th><th>Equity</th><th>Timesheet</th><th></th></tr></thead>
         <tbody>${T.hours.map(h => `<tr>
           <td class="nowrap">${dayText(h.worked_on)}</td><td class="num">${hrs(h.minutes)}</td><td>${esc(h.note)}</td>
           <td class="muted small">${esc(h.task || '')}</td>
           <td class="num">${h.cents == null ? '<span class="muted">no rate</span>' : money(h.cents)}</td>
+          <td class="num">${h.equity_cents ? money(h.equity_cents) : ''}</td>
           <td>${h.timesheet_status ? badge(SHEET[h.timesheet_status]) : '<span class="muted small">not yet</span>'}</td>
           <td class="right">${mine && h.editable ? `<button class="btn ghost sm-btn" data-edit="${h.id}" type="button">Edit</button>` : ''}</td>
-        </tr>`).join('') || `<tr><td colspan="7" class="empty-row">${mine ? 'Nothing logged yet.' : 'Nothing logged in the last few months.'}</td></tr>`}
+        </tr>`).join('') || `<tr><td colspan="8" class="empty-row">${mine ? 'Nothing logged yet.' : 'Nothing logged in the last few months.'}</td></tr>`}
         </tbody></table></div>
     </section>`;
   const who = $('#hwho');
@@ -440,10 +441,20 @@ function invoiceSheet(s) {
 }
 
 function sheetWhen(s) {
-  if (s.status === 'paid') return `${esc(first(s.paid_by))} on ${dayText(s.paid_on)}${s.paid_note ? `, ${esc(s.paid_note)}` : ''}`;
+  if (s.status === 'paid') return [s.paid_by ? esc(first(s.paid_by)) : '', s.paid_on ? `on ${dayText(s.paid_on)}` : '', s.paid_note ? esc(s.paid_note) : '']
+    .filter(Boolean).join(', ') || 'paid';
   if (s.status === 'returned') return `${esc(first(s.decided_by))}: ${esc(s.decision_note || '')}`;
   if (s.status === 'approved') return `by ${esc(first(s.decided_by))} ${esc(ago(s.decided_at))}`;
   return `submitted ${esc(ago(s.submitted_at))}`;
+}
+
+const pct = share => `${(share * 100).toFixed(3)}%`;
+
+function rateLabel(r) {
+  if (!r) return 'Set an hourly rate';
+  return r.equity_cents_per_hour
+    ? `${money(r.cents_per_hour)} cash + ${money(r.equity_cents_per_hour)} equity an hour`
+    : `${money(r.cents_per_hour)} an hour`;
 }
 
 function personCard(p) {
@@ -451,16 +462,21 @@ function personCard(p) {
   return `<section class="card person">
     <div class="row between">
       <h2 class="h2 flush">${esc(p.name)}${p.is_you ? ' <span class="muted small">you</span>' : ''}</h2>
-      <button class="btn ghost sm-btn" data-rate="${p.id}" type="button">${p.rate ? `${money(p.rate.cents_per_hour)} an hour` : 'Set an hourly rate'}</button>
+      <button class="btn ghost sm-btn" data-rate="${p.id}" type="button">${rateLabel(p.rate)}</button>
     </div>
-    <div class="owed"><span class="tv ${b.owed_cents ? 'ok' : ''}">${money(b.owed_cents)}</span><span class="tk">owed to ${p.is_you ? 'you' : esc(first(p.name))} now</span></div>
+    <div class="owed"><span class="tv ${b.owed_cents > 0 ? 'ok' : ''}">${money(b.owed_cents)}</span><span class="tk">owed to ${p.is_you ? 'you' : esc(first(p.name))} now</span></div>
     <dl class="kv bal">
-      <dt>Not yet submitted</dt><dd>${hrs(b.unsubmitted_minutes)}, ${money(b.unsubmitted_cents)}${b.unpriced_minutes ? ` <span class="warn">(${hrs(b.unpriced_minutes)} with no rate)</span>` : ''}</dd>
+      <dt>Hours logged</dt><dd>${hrs(b.logged_minutes)}</dd>
+      <dt>Cash earned</dt><dd>${money(b.cash_earned_cents)}${b.unpriced_minutes ? ` <span class="warn">(${hrs(b.unpriced_minutes)} with no rate)</span>` : ''}</dd>
+      <dt>Cash paid</dt><dd>${money(b.paid_cents)}</dd>
+      <dt>Equity earned</dt><dd>${money(b.equity_cents)}${b.equity_share ? ` <span class="muted">(${pct(b.equity_share)} of the company)</span>` : ''}</dd>
+      <dt>Total compensation</dt><dd>${money(b.total_earned_cents)}</dd>
+      <dt>Expenses to pay back</dt><dd>${money(b.expenses_owed_cents)}</dd>
+    </dl>
+    <dl class="kv bal flow">
+      <dt>Not yet on a timesheet</dt><dd>${hrs(b.unsubmitted_minutes)}, ${money(b.unsubmitted_cents)}</dd>
       <dt>Awaiting approval</dt><dd>${money(b.submitted_cents)}</dd>
       <dt>Approved, unpaid</dt><dd>${money(b.approved_cents)}</dd>
-      <dt>Expenses to pay back</dt><dd>${money(b.expenses_owed_cents)}</dd>
-      <dt>Paid to date</dt><dd>${money(b.paid_cents)} for ${hrs(b.paid_minutes)}</dd>
-      <dt>Earned to date</dt><dd>${money(b.earned_cents)}</dd>
     </dl>
   </section>`;
 }
@@ -470,25 +486,33 @@ async function rateSheet(p) {
   try { history = await api(`/api/team/rates?user_id=${p.id}`); } catch { /* the form still works */ }
   const sh = T.ctx.sheet(`<form class="step left" id="rateForm">
     <h2>${p.is_you ? 'Your' : `${esc(first(p.name))}'s`} hourly rate</h2>
-    <p class="muted">A new rate starts on a date and runs until the next one. Hours already on a timesheet keep the amount they were submitted at.</p>
+    <p class="muted">A new rate starts on a date and runs until the next one. Hours already on a timesheet keep the cash amount
+      they were submitted at. Equity is counted per hour at the equity rate and the valuation in force that day.</p>
     <div class="two">
-      <label>Dollars an hour<input name="rate" inputmode="decimal" placeholder="50" value="${p.rate ? (p.rate.cents_per_hour / 100) : ''}" required></label>
+      <label>Cash, dollars an hour<input name="rate" inputmode="decimal" placeholder="17.50" value="${p.rate ? (p.rate.cents_per_hour / 100) : ''}" required></label>
+      <label>Equity, dollars an hour<input name="equity" inputmode="decimal" placeholder="0" value="${p.rate?.equity_cents_per_hour ? (p.rate.equity_cents_per_hour / 100) : ''}"></label>
+    </div>
+    <div class="two">
+      <label>Company valuation, dollars<input name="valuation" inputmode="decimal" placeholder="500000" value="${p.rate?.valuation_cents ? (p.rate.valuation_cents / 100) : ''}"></label>
       <label>From<input name="effective_on" type="date" value="${todayKey()}" required></label>
     </div>
     <p class="err" role="alert" hidden></p>
     <button class="btn block" type="submit">Save rate</button>
     ${history.length ? `<h3 class="sub">So far</h3><ul class="plain">${history.map(r =>
-      `<li>${money(r.cents_per_hour)} an hour from ${dayText(r.effective_on)}<span class="muted"> · set by ${esc(first(r.set_by))}</span></li>`).join('')}</ul>` : ''}
+      `<li>${rateLabel(r)}${r.valuation_cents ? ` at a ${money(r.valuation_cents)} valuation` : ''} from ${dayText(r.effective_on)}<span class="muted"> · set by ${esc(first(r.set_by))}</span></li>`).join('')}</ul>` : ''}
   </form>`, { label: 'Hourly rate' });
   const form = sh.body.querySelector('#rateForm');
   form.rate.focus();
   form.onsubmit = async e => {
     e.preventDefault();
     const cents = toCents(form.rate.value);
-    if (!(cents >= 0)) return showErr(form, 'Enter the rate as a number of dollars.');
+    const equity = form.equity.value.trim() ? toCents(form.equity.value) : 0;
+    const valuation = form.valuation.value.trim() ? toCents(form.valuation.value) : null;
+    if (!(cents >= 0) || !(equity >= 0) || (valuation !== null && !(valuation >= 0))) return showErr(form, 'Enter each amount as a number of dollars.');
     try {
       await api('/api/team/rates', { method: 'POST', body: JSON.stringify({
-        user_id: p.id, cents_per_hour: cents, effective_on: form.effective_on.value }) });
+        user_id: p.id, cents_per_hour: cents, equity_cents_per_hour: equity, valuation_cents: valuation,
+        effective_on: form.effective_on.value }) });
       sh.close(); toast('Rate saved.'); draw();
     } catch (err) { showErr(form, err.message); }
   };

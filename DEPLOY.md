@@ -429,6 +429,16 @@ to boot if either demo switch is turned back on.
    person it pays. Turn on the authenticator app from the account menu:
    these accounts see every county.
 
+   Hours kept in a spreadsheet before the Team page existed come in once
+   with `tools/import_hours.py`: a CSV (or a Google Sheets export URL)
+   with Date, Work, Hours and "Billed on" columns, the rates from the
+   compensation agreement, and what was paid for each invoice label. Run
+   it with `--dry-run` first; it refuses to run twice for the same person.
+
+   ```bash
+   fly ssh console -u appuser -C "python tools/import_hours.py --email you@example.com --csv 'https://docs.google.com/spreadsheets/d/<id>/export?format=csv&gid=<gid>' --rate 2026-06-16:17.50+12.50@500000 --paid 'Invoice 1=1662.50' --by other@example.com --dry-run"
+   ```
+
 3. **Delete the demo county.** First see what would go, then delete it. The
    meeting directory and the self-pay county are untouched.
 

@@ -146,7 +146,7 @@ def test_a_timesheet_prices_each_day_at_the_rate_then_in_force(client, ids, team
     me = next(p for p in before["people"] if p["is_you"])
     assert me["rate"]["cents_per_hour"] == 5000
     assert me["balance"]["unsubmitted_minutes"] == 240 and me["balance"]["unsubmitted_cents"] == 18500
-    assert me["balance"]["owed_cents"] == 0
+    assert me["balance"]["owed_cents"] == 18500, "earned is owed, on a timesheet or not"
 
     sheet = client.post("/api/team/timesheets", json={"starts_on": D(14), "ends_on": D(0),
                                                      "note": "Two weeks of cook mode"}, headers=as_(joe))
@@ -181,7 +181,7 @@ def test_a_timesheet_prices_each_day_at_the_rate_then_in_force(client, ids, team
     assert paid["status"] == "paid" and paid["paid_cents"] == 18500 and paid["paid_note"] == "Zelle"
     after = next(p for p in client.get("/api/team/overview", headers=as_(joe)).json()["people"] if p["is_you"])
     assert after["balance"]["owed_cents"] == 0 and after["balance"]["paid_cents"] == 18500
-    assert after["balance"]["earned_cents"] == 18500
+    assert after["balance"]["cash_earned_cents"] == 18500
 
     actions = {a["action"] for a in client.get("/api/audit?limit=50", headers=as_(joe)).json()}
     assert {"team_set_rate", "team_submit_timesheet", "team_approve_timesheet",
@@ -308,3 +308,46 @@ def test_an_invoice_can_be_removed_again(client, ids, team):
     client.post(url, json={"invoice_ref": "1043"}, headers=as_(joe))
     cleared = client.post(url, json={}, headers=as_(joe)).json()
     assert cleared["invoice_ref"] is None and cleared["invoice_url"] is None and cleared["invoiced_at"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Equity
+# --------------------------------------------------------------------------- #
+
+def test_equity_accrues_per_hour_against_the_valuation_then_in_force(client, ids, team):
+    joe, spencer = team["joe"], team["spencer"]
+    bad = client.post("/api/team/rates", json={"user_id": spencer, "cents_per_hour": 1750,
+                                               "equity_cents_per_hour": 1250, "effective_on": D(100)},
+                      headers=as_(joe))
+    assert bad.status_code == 422 and "valuation" in bad.json()["detail"]
+
+    # $17.50 cash and $12.50 equity at a $500,000 valuation, then the same
+    # equity at a $1,000,000 valuation from a week ago.
+    for day, valuation in ((D(100), 500_000_00), (D(7), 1_000_000_00)):
+        r = client.post("/api/team/rates", json={"user_id": spencer, "cents_per_hour": 1750,
+                                                 "equity_cents_per_hour": 1250, "valuation_cents": valuation,
+                                                 "effective_on": day}, headers=as_(spencer))
+        assert r.status_code == 201 and r.json()["equity_cents_per_hour"] == 1250
+    assert client.post("/api/team/hours", json={"worked_on": D(30), "minutes": 24 * 60, "note": "A full day"},
+                       headers=as_(spencer)).status_code == 201
+    assert client.post("/api/team/hours", json={"worked_on": D(2), "minutes": 60, "note": "An hour"},
+                       headers=as_(spencer)).status_code == 201
+
+    mine = client.get("/api/team/hours", headers=as_(spencer)).json()
+    assert {h["note"]: (h["cents"], h["equity_cents"]) for h in mine}.items() >= {
+        "A full day": (24 * 1750, 24 * 1250), "An hour": (1750, 1250)}.items()
+    me = next(p for p in client.get("/api/team/overview", headers=as_(spencer)).json()["people"]
+              if p["is_you"])
+    assert me["rate"]["valuation_cents"] == 1_000_000_00
+    b = me["balance"]
+    # Every entry counts, including one logged in an earlier test: each at
+    # the valuation in force on its day, so a dollar of equity earned after
+    # the valuation doubled is half the share.
+    expected_cents = sum(h["equity_cents"] for h in mine)
+    expected_share = sum(h["equity_cents"] / (1_000_000_00 if h["worked_on"] >= D(7) else 500_000_00)
+                         for h in mine)
+    assert b["equity_cents"] == expected_cents == 24 * 1250 + 1250 + 1250
+    assert abs(b["equity_share"] - expected_share) < 1e-12
+    assert abs(b["total_earned_cents"] - (b["cash_earned_cents"] + b["equity_cents"])) <= 1
+    # Owed is cash earned less cash paid, with nothing paid yet.
+    assert b["owed_cents"] == b["cash_earned_cents"]

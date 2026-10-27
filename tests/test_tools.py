@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AuditLog, CheckIn, County, Meeting, MeetingSeries, Participant, Program, Role, Session as SessionRow,
-    User,
+    TeamHours, TeamTimesheet, User,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,3 +105,47 @@ def test_retire_demo_deletes_the_county_and_keeps_everyone_else(seeded_url):
 
     r = run(seeded_url, "tools/retire_demo.py", "--yes", ok=False)
     assert r.returncode != 0 and "no county called" in r.stderr
+
+
+def test_import_hours_fills_an_empty_log_and_the_balance_comes_out_as_the_sheet_had_it(seeded_url, tmp_path):
+    run(seeded_url, "tools/make_staff.py", "--name", "Joe Dillon", "--email", "joe@example.com", "--role", "superuser")
+    run(seeded_url, "tools/make_staff.py", "--name", "Spencer", "--email", "spencer@example.com", "--role", "superuser")
+    sheet = tmp_path / "hours.csv"
+    sheet.write_text(
+        "Date,Work,Hours,Cash ($/hour),Cash earned ($),Billed on\n"
+        "6/16/2026,Meeting,1,$17.50,$17.50,Invoice 1\n"
+        ",Code,3.5,$17.50,$61.25,Invoice 1\n"          # no date: goes with the row above
+        "10/12/2026,Twilio,5.5,$17.50,$96.25,Invoice 2\n"
+        "10/22/2026,,4,$17.50,$70.00,\n"
+        ",,,,,\n")
+    args = ["tools/import_hours.py", "--email", "Joe@Example.com", "--csv", str(sheet),
+            "--rate", "2026-06-16:17.50+12.50@500000", "--rate", "2026-10-01:20+15@500000",
+            "--paid", "Invoice 1=100", "--paid", "Invoice 2=50.25", "--by", "spencer@example.com"]
+
+    dry = run(seeded_url, *args, "--dry-run")
+    assert "would write 4 entries (14 hours)" in dry.stdout
+    with Session(create_engine(seeded_url)) as db:
+        assert db.scalar(select(func.count()).select_from(TeamHours)) == 0
+
+    done = run(seeded_url, *args)
+    assert "wrote 4 entries" in done.stdout and "Invoice 2: 1 entries, 5.5 hours, 110.00 at the rate, paid 50.25" in done.stdout
+    with Session(create_engine(seeded_url)) as db:
+        joe = db.scalar(select(User).where(User.email == "joe@example.com"))
+        hours = db.scalars(select(TeamHours).where(TeamHours.user_id == joe.id).order_by(TeamHours.id)).all()
+        assert [h.minutes for h in hours] == [60, 210, 330, 240]
+        assert hours[1].worked_on == hours[0].worked_on and "date not recorded" in hours[1].note
+        assert hours[3].note == "(no description)" and hours[3].timesheet_id is None
+        sheets = db.scalars(select(TeamTimesheet).order_by(TeamTimesheet.id)).all()
+        assert [(s.status.value, s.paid_cents, s.amount_cents) for s in sheets] == [
+            ("paid", 10000, 4 * 1750 + round(0.5 * 1750)),      # 4.5 h at $17.50
+            ("paid", 5025, round(5.5 * 2000))]                  # 5.5 h at $20
+        from app.routers.team import balance
+        b = balance(db, joe)
+        assert b["logged_minutes"] == 840 and b["paid_cents"] == 15025
+        assert b["cash_earned_cents"] == 7875 + 11000 + 8000          # the two sheets plus 4 h unsubmitted at $20
+        assert b["owed_cents"] == b["cash_earned_cents"] - 15025
+        assert b["equity_cents"] == round(4.5 * 1250) + round(5.5 * 1500) + 4 * 1500
+        assert abs(b["equity_share"] - b["equity_cents"] / 500_000_00) < 1e-12
+
+    again = run(seeded_url, *args, ok=False)
+    assert again.returncode != 0 and "already has hours" in again.stderr

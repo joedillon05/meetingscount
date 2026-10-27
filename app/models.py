@@ -688,13 +688,17 @@ class TeamTaskNote(Base):
 
 class TeamRate(Base):
     """
-    What an hour of someone's time is worth, from a date. A new rate is a new
-    row, so a raise never changes what an old timesheet said.
+    What an hour of someone's time is worth, from a date: cash, and equity
+    measured against the company valuation in force at the time. A new rate
+    is a new row, so a raise never changes what an old timesheet said, and
+    equity already earned keeps the valuation it was earned at.
     """
     __tablename__ = "team_rates"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    cents_per_hour: Mapped[int] = mapped_column(Integer)
+    cents_per_hour: Mapped[int] = mapped_column(Integer)                  # cash
+    equity_cents_per_hour: Mapped[int] = mapped_column(Integer, default=0)
+    valuation_cents: Mapped[int | None] = mapped_column(Integer)          # what 100% is worth
     effective_on: Mapped[date] = mapped_column(Date)
     set_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

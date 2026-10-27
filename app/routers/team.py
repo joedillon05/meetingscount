@@ -8,15 +8,17 @@ superuser is only ever made from the command line (tools/make_staff.py).
 The money rules, in one place:
 
     an hours entry is worth its minutes at the rate in force on that day
-    a timesheet freezes its hours and amount when it is submitted
+    a timesheet freezes its hours and cash amount when it is submitted
+    equity accrues per hour at the equity rate, against the valuation then in force
     you cannot approve, send back or pay your own timesheet
     you cannot reimburse an expense you paid yourself
-    owed to someone = approved but unpaid timesheets + unreimbursed expenses
+    owed to someone = cash earned, less cash paid, plus their unreimbursed expenses
 
 Money is whole cents and time is whole minutes, end to end.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -75,31 +77,63 @@ def rate_on(rates: list[TeamRate], day: date) -> TeamRate | None:
     return current
 
 
-def value_of(minutes: int, cents_per_hour: int) -> int:
-    return round(minutes * cents_per_hour / 60)
+def value_of(minutes: int, cents_per_hour: int) -> float:
+    """Exact cents, not yet rounded. Sum first, round once, so totals match a spreadsheet's."""
+    return minutes * cents_per_hour / 60
+
+
+def whole(cents: float) -> int:
+    """To the nearest cent, halves up."""
+    return int(math.floor(cents + 0.5))
 
 
 def balance(db: Session, member: User) -> dict:
+    """
+    The ledger for one person. Cash: what their hours have earned (frozen
+    amounts for hours on a timesheet, today's rate for the rest), what has
+    been paid, and the difference. Equity: every hour at the equity rate in
+    force that day, and the share of the company that comes to at the
+    valuation in force that day.
+    """
     rates = _rates(db, member.id)
-    free = db.scalars(select(TeamHours).where(TeamHours.user_id == member.id,
-                                              TeamHours.timesheet_id.is_(None))).all()
-    unsubmitted_cents = unpriced = 0
+    hours = db.scalars(select(TeamHours).where(TeamHours.user_id == member.id)).all()
+    free = [h for h in hours if h.timesheet_id is None]
+    unsubmitted_cents = 0.0
+    unpriced = 0
     for h in free:
         r = rate_on(rates, h.worked_on)
         if r is None:
             unpriced += h.minutes
         else:
             unsubmitted_cents += value_of(h.minutes, r.cents_per_hour)
+    equity_cents = 0.0
+    equity_share = 0.0
+    for h in hours:
+        r = rate_on(rates, h.worked_on)
+        if r is None or not r.equity_cents_per_hour:
+            continue
+        cents = value_of(h.minutes, r.equity_cents_per_hour)
+        equity_cents += cents
+        if r.valuation_cents:
+            equity_share += cents / r.valuation_cents
+    exact_unsubmitted, exact_equity = unsubmitted_cents, equity_cents
+    unsubmitted_cents, equity_cents = whole(unsubmitted_cents), whole(equity_cents)
     sheets = db.scalars(select(TeamTimesheet).where(TeamTimesheet.user_id == member.id)).all()
     by = {s: [t for t in sheets if t.status == s] for s in TeamTimesheetStatus}
     paid_cents = sum(t.paid_cents if t.paid_cents is not None else t.amount_cents
                      for t in by[TeamTimesheetStatus.paid])
+    paid_sheets_cents = sum(t.amount_cents for t in by[TeamTimesheetStatus.paid])
     submitted = sum(t.amount_cents for t in by[TeamTimesheetStatus.submitted])
     approved = sum(t.amount_cents for t in by[TeamTimesheetStatus.approved])
     expenses_owed = sum(e.amount_cents for e in db.scalars(
         select(TeamExpense).where(TeamExpense.paid_by_id == member.id,
                                   TeamExpense.reimbursed_at.is_(None))))
+    cash_earned = unsubmitted_cents + submitted + approved + paid_sheets_cents
+    # Rounded once from the exact figures, so it matches a spreadsheet that
+    # sums before it rounds.
+    total_earned = whole(exact_unsubmitted + submitted + approved + paid_sheets_cents + exact_equity)
     return {
+        "logged_minutes": sum(h.minutes for h in hours),
         "unsubmitted_minutes": sum(h.minutes for h in free),
         "unsubmitted_cents": unsubmitted_cents,
         "unpriced_minutes": unpriced,
@@ -110,18 +144,29 @@ def balance(db: Session, member: User) -> dict:
         "paid_minutes": sum(t.minutes for t in by[TeamTimesheetStatus.paid]),
         "paid_cents": paid_cents,
         "expenses_owed_cents": expenses_owed,
-        # What the company owes this person today, and what their time has
-        # come to altogether, paid or not.
-        "owed_cents": approved + expenses_owed,
-        "earned_cents": unsubmitted_cents + submitted + approved + paid_cents,
+        "cash_earned_cents": cash_earned,
+        "equity_cents": equity_cents,
+        "equity_share": equity_share,                     # a fraction: 0.0031 is 0.31%
+        "total_earned_cents": total_earned,
+        # What the company owes this person today.
+        "owed_cents": cash_earned - paid_cents + expenses_owed,
     }
+
+
+def rate_out(r: TeamRate, names: dict[int, str] | None = None) -> dict:
+    out = {"id": r.id, "user_id": r.user_id, "cents_per_hour": r.cents_per_hour,
+           "equity_cents_per_hour": r.equity_cents_per_hour or 0,
+           "valuation_cents": r.valuation_cents, "effective_on": r.effective_on.isoformat()}
+    if names is not None:
+        out["set_by"] = names.get(r.set_by_id)
+        out["created_at"] = r.created_at.isoformat()
+    return out
 
 
 def person_out(db: Session, u: User, me: User) -> dict:
     current = rate_on(_rates(db, u.id), date.today())
     return {"id": u.id, "name": u.name, "is_you": u.id == me.id,
-            "rate": ({"cents_per_hour": current.cents_per_hour,
-                      "effective_on": current.effective_on.isoformat()} if current else None),
+            "rate": rate_out(current) if current else None,
             "balance": balance(db, u)}
 
 
@@ -259,7 +304,8 @@ def hours_out(h: TeamHours, rates: list[TeamRate], sheets: dict[int, TeamTimeshe
         "id": h.id, "user_id": h.user_id, "worked_on": h.worked_on.isoformat(),
         "minutes": h.minutes, "note": h.note,
         "task_id": h.task_id, "task": h.task.title if h.task else None,
-        "cents": value_of(h.minutes, r.cents_per_hour) if r else None,
+        "cents": whole(value_of(h.minutes, r.cents_per_hour)) if r else None,
+        "equity_cents": whole(value_of(h.minutes, r.equity_cents_per_hour or 0)) if r else None,
         "timesheet_id": h.timesheet_id,
         "timesheet_status": sheet.status.value if sheet else None,
         "editable": h.timesheet_id is None,
@@ -344,9 +390,7 @@ def list_rates(user_id: int | None = None, db: Session = Depends(get_db),
                user: User = Depends(TEAM)):
     who = _member(db, user_id) if user_id else user
     names = _names(db)
-    return [{"id": r.id, "user_id": r.user_id, "cents_per_hour": r.cents_per_hour,
-             "effective_on": r.effective_on.isoformat(), "set_by": names.get(r.set_by_id),
-             "created_at": r.created_at.isoformat()} for r in reversed(_rates(db, who.id))]
+    return [rate_out(r, names) for r in reversed(_rates(db, who.id))]
 
 
 @router.post("/rates", status_code=201)
@@ -358,15 +402,21 @@ def set_rate(body: TeamRateIn, request: Request, db: Session = Depends(get_db),
     were submitted at.
     """
     who = _member(db, body.user_id)
+    if body.equity_cents_per_hour and not body.valuation_cents:
+        raise HTTPException(422, "An equity rate needs the company valuation it is measured against.")
     r = TeamRate(user_id=who.id, cents_per_hour=body.cents_per_hour,
+                 equity_cents_per_hour=body.equity_cents_per_hour,
+                 valuation_cents=body.valuation_cents,
                  effective_on=body.effective_on, set_by_id=user.id)
     db.add(r)
     db.commit()
+    detail = f"{who.name}: {body.cents_per_hour / 100:.2f}/h cash"
+    if body.equity_cents_per_hour:
+        detail += (f" + {body.equity_cents_per_hour / 100:.2f}/h equity"
+                   f" at a {body.valuation_cents / 100:,.0f} valuation")
     audit(db, user, "team_set_rate", target_type="user", target_id=who.id,
-          detail=f"{who.name}: {body.cents_per_hour / 100:.2f}/h from {body.effective_on.isoformat()}",
-          request=request)
-    return {"id": r.id, "user_id": r.user_id, "cents_per_hour": r.cents_per_hour,
-            "effective_on": r.effective_on.isoformat()}
+          detail=f"{detail} from {body.effective_on.isoformat()}", request=request)
+    return rate_out(r)
 
 
 # --------------------------------------------------------------------------- #
@@ -427,13 +477,14 @@ def submit_timesheet(body: TeamTimesheetIn, request: Request, db: Session = Depe
     if not hours:
         raise HTTPException(422, "No unsubmitted hours in that range.")
     rates = _rates(db, user.id)
-    amount = 0
+    amount = 0.0
     for h in hours:
         r = rate_on(rates, h.worked_on)
         if r is None:
             raise HTTPException(422, f"No hourly rate is set for {h.worked_on.isoformat()}. "
                                      "Set a rate on the Money tab first.")
         amount += value_of(h.minutes, r.cents_per_hour)
+    amount = whole(amount)
     t = TeamTimesheet(user_id=user.id, starts_on=body.starts_on, ends_on=body.ends_on,
                       minutes=sum(h.minutes for h in hours), amount_cents=amount,
                       note=(body.note or "").strip() or None)
