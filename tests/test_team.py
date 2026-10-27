@@ -262,3 +262,49 @@ def test_an_expense_someone_paid_is_owed_until_the_other_founder_reimburses_it(c
 def test_the_team_pages_never_show_up_in_a_county_admins_audit_log(client, ids, team):
     rows = client.get("/api/audit?limit=500", headers=as_(ids["admin"])).json()
     assert not any(a["action"].startswith("team_") for a in rows)
+
+
+# --------------------------------------------------------------------------- #
+# The invoice sent for a timesheet
+# --------------------------------------------------------------------------- #
+
+def test_the_person_paid_attaches_the_invoice_and_the_payer_gets_its_link(client, ids, team):
+    joe, spencer = team["joe"], team["spencer"]
+    client.post("/api/team/rates", json={"user_id": joe, "cents_per_hour": 5000, "effective_on": D(400)},
+                headers=as_(joe))
+    client.post("/api/team/hours", json={"worked_on": D(20), "minutes": 60, "note": "Invoice test"},
+                headers=as_(joe))
+    sheet = client.post("/api/team/timesheets", json={"starts_on": D(20), "ends_on": D(20)},
+                        headers=as_(joe)).json()
+    url = f"/api/team/timesheets/{sheet['id']}/invoice"
+    body = {"invoice_ref": "1042", "invoice_url": "https://found.com/pay/abc123"}
+
+    assert client.post(url, json=body, headers=as_(spencer)).status_code == 403, "not the payer's to set"
+    assert client.post(url, json={"invoice_ref": "1042", "invoice_url": "http://found.com/pay/abc123"},
+                       headers=as_(joe)).status_code == 422, "https only"
+    done = client.post(url, json=body, headers=as_(joe)).json()
+    assert done["invoice_ref"] == "1042" and done["invoice_url"] == body["invoice_url"] and done["invoiced_at"]
+
+    # Still there after approval, and the payment note names it by default.
+    client.post(f"/api/team/timesheets/{sheet['id']}/approve", json={}, headers=as_(spencer))
+    listed = next(s for s in client.get("/api/team/timesheets", headers=as_(spencer)).json()
+                  if s["id"] == sheet["id"])
+    assert listed["invoice_url"] == body["invoice_url"]
+    paid = client.post(f"/api/team/timesheets/{sheet['id']}/pay", json={}, headers=as_(spencer)).json()
+    assert paid["paid_note"] == "Invoice 1042"
+    assert client.post(url, json=body, headers=as_(joe)).status_code == 409, "paid sheets are a record"
+
+    actions = {a["action"] for a in client.get("/api/audit?limit=50", headers=as_(joe)).json()}
+    assert "team_invoice_timesheet" in actions
+
+
+def test_an_invoice_can_be_removed_again(client, ids, team):
+    joe = team["joe"]
+    client.post("/api/team/hours", json={"worked_on": D(21), "minutes": 30, "note": "Remove test"},
+                headers=as_(joe))
+    sheet = client.post("/api/team/timesheets", json={"starts_on": D(21), "ends_on": D(21)},
+                        headers=as_(joe)).json()
+    url = f"/api/team/timesheets/{sheet['id']}/invoice"
+    client.post(url, json={"invoice_ref": "1043"}, headers=as_(joe))
+    cleared = client.post(url, json={}, headers=as_(joe)).json()
+    assert cleared["invoice_ref"] is None and cleared["invoice_url"] is None and cleared["invoiced_at"] is None

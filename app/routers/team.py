@@ -30,8 +30,8 @@ from ..models import (
     TeamTimesheet, TeamTimesheetStatus, User,
 )
 from ..schemas import (
-    TeamDecisionIn, TeamExpenseIn, TeamExpensePatch, TeamHoursIn, TeamHoursPatch, TeamNoteIn,
-    TeamPaymentIn, TeamRateIn, TeamTaskIn, TeamTaskPatch, TeamTimesheetIn,
+    TeamDecisionIn, TeamExpenseIn, TeamExpensePatch, TeamHoursIn, TeamHoursPatch, TeamInvoiceIn,
+    TeamNoteIn, TeamPaymentIn, TeamRateIn, TeamTaskIn, TeamTaskPatch, TeamTimesheetIn,
 )
 
 router = APIRouter(prefix="/api/team", tags=["team"])
@@ -385,6 +385,8 @@ def timesheet_out(t: TeamTimesheet, names: dict[int, str], *, entries: bool = Fa
         "paid_by": names.get(t.paid_by_id),
         "paid_on": t.paid_on.isoformat() if t.paid_on else None,
         "paid_cents": t.paid_cents, "paid_note": t.paid_note,
+        "invoice_ref": t.invoice_ref, "invoice_url": t.invoice_url,
+        "invoiced_at": t.invoiced_at.isoformat() if t.invoiced_at else None,
         "entries": len(t.hours),
     }
     if entries:
@@ -489,6 +491,35 @@ def return_timesheet(sheet_id: int, body: TeamDecisionIn, request: Request,
     return timesheet_out(t, _names(db))
 
 
+@router.post("/timesheets/{sheet_id}/invoice")
+def invoice_timesheet(sheet_id: int, body: TeamInvoiceIn, request: Request,
+                      db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    """
+    Attach the invoice you sent for this sheet, from Found or wherever: its
+    number and the payment link. The other founder opens the link to pay and
+    then marks the sheet paid here. Yours alone to set, and only while the
+    sheet is waiting to be approved or paid.
+    """
+    t = db.get(TeamTimesheet, sheet_id)
+    if not t:
+        raise HTTPException(404, "timesheet not found")
+    if t.user_id != user.id:
+        raise HTTPException(403, "Only the person a timesheet pays attaches its invoice.")
+    if t.status not in (TeamTimesheetStatus.submitted, TeamTimesheetStatus.approved):
+        raise HTTPException(409, f"This timesheet is {t.status.value}.")
+    ref = (body.invoice_ref or "").strip() or None
+    url = (body.invoice_url or "").strip() or None
+    if url and not url.lower().startswith("https://"):
+        raise HTTPException(422, "The payment link has to start with https://.")
+    t.invoice_ref, t.invoice_url = ref, url
+    t.invoiced_at = utcnow() if (ref or url) else None
+    db.commit()
+    audit(db, user, "team_invoice_timesheet", target_type="team_timesheet", target_id=t.id,
+          detail=(f"invoice {ref}" if ref else "invoice link") if (ref or url) else "invoice removed",
+          request=request)
+    return timesheet_out(t, _names(db))
+
+
 @router.post("/timesheets/{sheet_id}/pay")
 def pay_timesheet(sheet_id: int, body: TeamPaymentIn, request: Request,
                   db: Session = Depends(get_db), user: User = Depends(TEAM)):
@@ -498,7 +529,7 @@ def pay_timesheet(sheet_id: int, body: TeamPaymentIn, request: Request,
     t.paid_by_id = user.id
     t.paid_on = body.paid_on or date.today()
     t.paid_cents = body.paid_cents if body.paid_cents is not None else t.amount_cents
-    t.paid_note = (body.note or "").strip() or None
+    t.paid_note = (body.note or "").strip() or (f"Invoice {t.invoice_ref}" if t.invoice_ref else None)
     db.commit()
     audit(db, user, "team_pay_timesheet", target_type="team_timesheet", target_id=t.id,
           detail=f"{_names(db).get(t.user_id)}: {t.paid_cents / 100:.2f}"

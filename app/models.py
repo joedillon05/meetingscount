@@ -744,6 +744,11 @@ class TeamTimesheet(Base):
     paid_on: Mapped[date | None] = mapped_column(Date)
     paid_cents: Mapped[int | None] = mapped_column(Integer)
     paid_note: Mapped[str | None] = mapped_column(String(200))       # how: "Zelle", a check number
+    # The invoice sent for this sheet from outside the app (Found, say):
+    # its number and the payment link the other founder opens to pay it.
+    invoice_ref: Mapped[str | None] = mapped_column(String(60))
+    invoice_url: Mapped[str | None] = mapped_column(String(500))
+    invoiced_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     hours: Mapped[list[TeamHours]] = relationship(order_by="TeamHours.worked_on")
 

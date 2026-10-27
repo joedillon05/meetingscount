@@ -293,6 +293,12 @@ class TeamDecisionIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=400)
 
 
+class TeamInvoiceIn(BaseModel):
+    """The invoice sent for a timesheet. A number, a link, or both; both empty removes it."""
+    invoice_ref: Optional[str] = Field(default=None, max_length=60)
+    invoice_url: Optional[str] = Field(default=None, max_length=500)
+
+
 class TeamPaymentIn(BaseModel):
     paid_on: Optional[date] = None
     paid_cents: Optional[int] = Field(default=None, ge=0)

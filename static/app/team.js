@@ -346,18 +346,21 @@ async function drawMoney() {
     <div class="people">${T.overview.people.map(personCard).join('')}</div>
     <section class="card flush">
       <div class="toolbar"><b>Timesheets</b>
-        <span class="muted small">Approve or send back the other founder's. Mark paid once the money has gone.</span></div>
+        <span class="muted small">Attach the invoice you sent for yours. Approve or send back the other founder's, pay from the link, then mark it paid.</span></div>
       <div class="table-wrap"><table class="grid">
         <thead><tr><th>Who</th><th>Period</th><th>Hours</th><th>Amount</th><th>Status</th><th></th></tr></thead>
         <tbody>${T.sheets.map(s => `<tr class="${s.status === 'returned' ? 'off' : ''}">
           <td><b>${esc(first(s.person))}</b></td>
           <td class="nowrap">${dayText(s.starts_on)} to ${dayText(s.ends_on)}${s.note ? `<div class="muted small">${esc(s.note)}</div>` : ''}</td>
           <td class="num">${hrs(s.minutes)}</td>
-          <td class="num">${money(s.amount_cents)}${s.status === 'paid' && s.paid_cents !== s.amount_cents ? `<div class="muted small">paid ${money(s.paid_cents)}</div>` : ''}</td>
+          <td class="num">${money(s.amount_cents)}${s.status === 'paid' && s.paid_cents !== s.amount_cents ? `<div class="muted small">paid ${money(s.paid_cents)}</div>` : ''}${
+            s.invoice_ref || s.invoice_url ? `<div class="muted small">${invoiceLabel(s)}</div>` : ''}</td>
           <td>${badge(SHEET[s.status])}<div class="muted small">${sheetWhen(s)}</div></td>
           <td class="right nowrap">
             <button class="btn ghost sm-btn" data-view="${s.id}" type="button">Entries</button>
+            ${s.user_id === myId && (s.status === 'submitted' || s.status === 'approved') ? `<button class="btn ghost sm-btn" data-invoice="${s.id}" type="button">${s.invoice_ref || s.invoice_url ? 'Edit invoice' : 'Add invoice'}</button>` : ''}
             ${s.user_id !== myId && s.status === 'submitted' ? `<button class="btn secondary sm-btn" data-approve="${s.id}" type="button">Approve</button>` : ''}
+            ${s.user_id !== myId && s.status === 'approved' && s.invoice_url ? `<a class="btn secondary sm-btn" href="${esc(s.invoice_url)}" target="_blank" rel="noopener">Pay invoice${s.invoice_ref ? ` ${esc(s.invoice_ref)}` : ''}</a>` : ''}
             ${s.user_id !== myId && s.status === 'approved' ? `<button class="btn sm-btn" data-pay="${s.id}" type="button">Mark paid</button>` : ''}
             ${s.user_id !== myId && (s.status === 'submitted' || s.status === 'approved') ? `<button class="btn ghost sm-btn" data-return="${s.id}" type="button">Send back</button>` : ''}
           </td></tr>`).join('') || '<tr><td colspan="6" class="empty-row">No timesheets yet. They are submitted from the Hours tab.</td></tr>'}
@@ -390,6 +393,7 @@ async function drawMoney() {
   b.querySelectorAll('[data-approve]').forEach(x => x.onclick = () => decideSheet(sheetById(x.dataset.approve), 'approve'));
   b.querySelectorAll('[data-return]').forEach(x => x.onclick = () => decideSheet(sheetById(x.dataset.return), 'return'));
   b.querySelectorAll('[data-pay]').forEach(x => x.onclick = () => paySheet(sheetById(x.dataset.pay)));
+  b.querySelectorAll('[data-invoice]').forEach(x => x.onclick = () => invoiceSheet(sheetById(x.dataset.invoice)));
   b.querySelector('[data-addexp]').onclick = () => expenseSheet();
   b.querySelectorAll('[data-editexp]').forEach(x => x.onclick = () =>
     expenseSheet(T.expenses.find(e => e.id === Number(x.dataset.editexp))));
@@ -398,6 +402,42 @@ async function drawMoney() {
 }
 
 const sheetById = id => T.sheets.find(s => s.id === Number(id));
+
+/* "Invoice 1042", linked when there is somewhere to pay it. */
+function invoiceLabel(s) {
+  const text = s.invoice_ref ? `Invoice ${esc(s.invoice_ref)}` : 'Invoice';
+  return s.invoice_url ? `<a href="${esc(s.invoice_url)}" target="_blank" rel="noopener">${text}</a>` : text;
+}
+
+function invoiceSheet(s) {
+  const has = s.invoice_ref || s.invoice_url;
+  const sh = T.ctx.sheet(`<form class="step left" id="invForm">
+    <h2>${has ? 'The invoice for this timesheet' : 'Attach the invoice'}</h2>
+    <p class="muted">${dayText(s.starts_on)} to ${dayText(s.ends_on)}, ${money(s.amount_cents)}. Send the invoice from Found as usual,
+      then put its number and payment link here. ${esc(first(T.overview.people.find(p => !p.is_you)?.name || 'The other founder'))} pays from the link and marks the sheet paid.</p>
+    <label>Invoice number<input name="invoice_ref" maxlength="60" value="${esc(s.invoice_ref || '')}" placeholder="1042"></label>
+    <label>Payment link<input name="invoice_url" type="url" maxlength="500" value="${esc(s.invoice_url || '')}" placeholder="https://"></label>
+    <p class="err" role="alert" hidden></p>
+    <button class="btn block" type="submit">Save</button>
+    ${has ? '<button class="btn block ghost danger-link" data-remove type="button">Remove the invoice</button>' : ''}
+  </form>`, { label: 'Invoice' });
+  const form = sh.body.querySelector('#invForm');
+  form.invoice_ref.focus();
+  const send = async body => {
+    try {
+      await api(`/api/team/timesheets/${s.id}/invoice`, { method: 'POST', body: JSON.stringify(body) });
+      sh.close(); toast(body.invoice_ref || body.invoice_url ? 'Invoice attached.' : 'Invoice removed.'); draw();
+    } catch (err) { showErr(form, err.message); }
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const ref = form.invoice_ref.value.trim(), url = form.invoice_url.value.trim();
+    if (!ref && !url) return showErr(form, 'A number, a link, or both.');
+    send({ invoice_ref: ref || null, invoice_url: url || null });
+  };
+  const remove = form.querySelector('[data-remove]');
+  if (remove) remove.onclick = () => send({ invoice_ref: null, invoice_url: null });
+}
 
 function sheetWhen(s) {
   if (s.status === 'paid') return `${esc(first(s.paid_by))} on ${dayText(s.paid_on)}${s.paid_note ? `, ${esc(s.paid_note)}` : ''}`;
@@ -461,6 +501,7 @@ async function entriesSheet(id) {
     <h2>${esc(first(s.person))}, ${dayText(s.starts_on)} to ${dayText(s.ends_on)}</h2>
     <p class="muted">${hrs(s.minutes)} for ${money(s.amount_cents)}. ${badge(SHEET[s.status])}</p>
     ${s.note ? `<p class="callout">${icon('note')} <span>${esc(s.note)}</span></p>` : ''}
+    ${s.invoice_ref || s.invoice_url ? `<p class="callout">${icon('file')} <span>${invoiceLabel(s)}</span></p>` : ''}
     ${s.decision_note && s.status === 'returned' ? `<p class="callout warn">${icon('alert')} <span>Sent back: ${esc(s.decision_note)}</span></p>` : ''}
     <ul class="tl">${s.hours.map(h => `<li class="t-ok"><span class="t-when">${dayText(h.worked_on)} · ${hrs(h.minutes)}</span>
       <p>${esc(h.note)}${h.task ? `<br><span class="muted small">${esc(h.task)}</span>` : ''}</p></li>`).join('')}</ul>
@@ -493,11 +534,12 @@ function paySheet(s) {
   const sh = T.ctx.sheet(`<form class="step left" id="payForm">
     <h2>Mark ${esc(first(s.person))}'s timesheet paid</h2>
     <p class="muted">This records that the money went. Nothing is moved from here.</p>
+    ${s.invoice_url ? `<p class="callout">${icon('file')} <span>Not paid yet? <a href="${esc(s.invoice_url)}" target="_blank" rel="noopener">Open ${s.invoice_ref ? `invoice ${esc(s.invoice_ref)}` : 'the invoice'}</a> and pay it first.</span></p>` : ''}
     <div class="two">
       <label>Amount paid<input name="amount" inputmode="decimal" value="${(s.amount_cents / 100).toFixed(2)}" required></label>
       <label>On<input name="paid_on" type="date" value="${todayKey()}" required></label>
     </div>
-    <label>How<input name="note" maxlength="200" placeholder="Zelle, check 1042"></label>
+    <label>How<input name="note" maxlength="200" value="${s.invoice_ref ? `Invoice ${esc(s.invoice_ref)}` : ''}" placeholder="Zelle, check 1042"></label>
     <p class="err" role="alert" hidden></p>
     <button class="btn block" type="submit">Mark paid</button>
   </form>`, { label: 'Mark paid' });

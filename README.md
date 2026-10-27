@@ -266,7 +266,10 @@ audit log. Four things live there:
   hourly rate in force on each day and frozen at submission. The other
   founder approves it, or sends it back with a reason (the hours return to
   the log), then marks it paid once the money has gone. The app records the
-  payment; it never moves money.
+  payment; it never moves money. The person a sheet pays can attach the
+  invoice they sent for it, from Found or anywhere else: its number and
+  payment link. The other founder pays from that link, and the payment
+  note names the invoice by default.
 - **Expenses.** What the business cost and who paid. Something paid on a
   personal card is owed until the other founder marks it paid back.
 
