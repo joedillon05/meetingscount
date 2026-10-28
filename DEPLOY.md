@@ -450,9 +450,8 @@ to boot if either demo switch is turned back on.
    fly ssh console -u appuser -C "python tools/retire_demo.py --yes"
    ```
 
-   The published demo password now opens nothing. Any county that signs up
-   later gets its own admin account from `make_staff.py` with `--role admin
-   --county "Their County"`.
+   The published demo password now opens nothing. A court that signs up
+   later is set up as in "A new court", below.
 
 What changes with demo mode off: the sign-in screen lists no accounts and
 shows no codes; sign-in and sign-up codes go by text to any number, so
@@ -460,6 +459,36 @@ shows no codes; sign-in and sign-up codes go by text to any number, so
 to reach US carriers (see Texts, above); `/join` is open only while Stripe
 and Twilio are both configured; the simulator on `/ops` can no longer send
 fake timestamps; and `/docs` is switched off.
+
+## A new court
+
+Each court is a county of its own: its staff see only its own participants.
+Make the county and its programs first, then its people. A program's join
+code is what an officer gives a participant, so keep it short and say-able.
+`--list` shows what is already there.
+
+```bash
+fly ssh console -u appuser -C "python tools/make_county.py --list"
+```
+
+```bash
+fly ssh console -u appuser -C "python tools/make_county.py --name '23rd District Court, Taylor' --program 'Probation=TAYLOR-PROB' --program 'Regional Treatment Court=TAYLOR-RTC'"
+```
+
+Then one `make_staff.py` per person, with the county's name exactly as it
+was made. The person who runs the department is the admin: the Staff page,
+settings, the audit log and the Texts page are theirs, and they can reset a
+colleague's password from the dashboard. Everyone else is an officer. The
+work number is optional and is only kept on the account; staff sign in with
+email and password, never by text.
+
+```bash
+fly ssh console -u appuser -C "python tools/make_staff.py --name 'Pat Lee' --email pat@example.gov --role admin --county '23rd District Court, Taylor' --phone 734-555-0101"
+```
+
+Each run prints that person's first password once. Hand it over the way
+you would any password, not in an email thread with the whole list. The
+dashboard makes them choose their own before it shows anything.
 
 What a live preview still is not: see the list below, in particular backups.
 The SQLite file on the Fly volume gets a daily snapshot that Fly keeps for a

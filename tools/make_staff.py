@@ -4,17 +4,19 @@ Create a staff account from the command line.
 
     python tools/make_staff.py --name "Joe Dillon" --email joe@example.com --role superuser
     python tools/make_staff.py --name "Pat Lee" --email pat@example.gov --role admin --county "Washtenaw County"
+    python tools/make_staff.py --name "Pat Lee" --email pat@example.gov --role officer --county "Washtenaw County" --phone 734-555-0101
 
 The first real account on a deployment has to come from somewhere other
 than the dashboard, and a superuser (who sees every county, including the
 self-pay one) can only be made here. Prints a first password once; the
-person must choose their own at first sign-in. Uses the same
-MC_DATABASE_URL as the app.
+person must choose their own at first sign-in. The county has to exist
+already (tools/make_county.py). Uses the same MC_DATABASE_URL as the app.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -24,11 +26,15 @@ from sqlalchemy import select  # noqa: E402
 
 from app.db import SessionLocal, create_all  # noqa: E402
 from app.models import County, Role, User  # noqa: E402
-from app.security import hash_password, temp_password  # noqa: E402
+from app.security import hash_password, normalize_phone, temp_password  # noqa: E402
 
 
-def make_staff(db, *, name: str, email: str, role: Role, county: str | None) -> tuple[User, str]:
+def make_staff(db, *, name: str, email: str, role: Role, county: str | None,
+               phone: str | None = None) -> tuple[User, str]:
     email = email.strip().lower()
+    phone = normalize_phone(phone)
+    if phone and not re.fullmatch(r"\+1\d{10}", phone):
+        raise SystemExit(f"{phone} is not a ten-digit US phone number")
     if db.scalar(select(User).where(User.email == email)):
         raise SystemExit(f"there is already an account for {email}")
     county_id = None
@@ -41,7 +47,7 @@ def make_staff(db, *, name: str, email: str, role: Role, county: str | None) -> 
         county_id = row.id
     first = temp_password()
     person = User(county_id=county_id, role=role, name=" ".join(name.split()), email=email,
-                  password_hash=hash_password(first), password_set_at=datetime.now(timezone.utc),
+                  phone=phone, password_hash=hash_password(first), password_set_at=datetime.now(timezone.utc),
                   must_change_password=True)
     db.add(person)
     db.commit()
@@ -54,16 +60,18 @@ def main() -> int:
     ap.add_argument("--email", required=True)
     ap.add_argument("--role", choices=["officer", "admin", "superuser"], default="admin")
     ap.add_argument("--county", help="the county's name, for an officer or admin")
+    ap.add_argument("--phone", help="their work number, kept on the account")
     args = ap.parse_args()
 
     create_all()
     db = SessionLocal()
     try:
         person, first = make_staff(db, name=args.name, email=args.email, role=Role(args.role),
-                                   county=args.county)
+                                   county=args.county, phone=args.phone)
     finally:
         db.close()
-    print(f"created {person.role.value} {person.name} <{person.email}>")
+    print(f"created {person.role.value} {person.name} <{person.email}>"
+          + (f" {person.phone}" if person.phone else ""))
     print(f"first password: {first}")
     print("sign in at /officer and choose a new password. This one is not shown again.")
     return 0

@@ -1,6 +1,7 @@
 """
 The command-line tools a deployment is run with: making the first real
-staff account, and deleting the demo county before real people arrive.
+staff account, a court's county and its staff, and deleting the demo county
+before real people arrive.
 
 Each test seeds its own throwaway database and runs the tool the way it is
 run on the server, as a separate process, so nothing here can touch the
@@ -63,6 +64,53 @@ def test_make_staff_creates_a_superuser_with_a_one_time_password(seeded_url):
         pat = db.scalar(select(User).where(User.email == "pat@example.gov"))
         assert pat.role == Role.officer and pat.county_id == db.scalar(
             select(County.id).where(County.name == "Washtenaw County"))
+
+
+def test_make_county_makes_a_court_its_programs_and_then_its_staff(seeded_url):
+    taylor = "23rd District Court, Taylor"
+    r = run(seeded_url, "tools/make_county.py", "--name", " 23rd  District Court, Taylor ",
+            "--program", "Probation=taylor-prob", "--program", "Regional Treatment Court=TAYLOR-RTC")
+    assert f"created {taylor} (MI, America/Detroit)" in r.stdout
+    assert "added program Probation with join code TAYLOR-PROB" in r.stdout
+    assert "added program Regional Treatment Court with join code TAYLOR-RTC" in r.stdout
+    with Session(create_engine(seeded_url)) as db:
+        county = db.scalar(select(County).where(County.name == taylor))
+        assert county.state == "MI" and not county.self_serve
+        codes = db.scalars(select(Program.join_code).where(Program.county_id == county.id)).all()
+        assert sorted(codes) == ["TAYLOR-PROB", "TAYLOR-RTC"]
+
+    # Running it again does nothing silently: no programs is a refusal, the
+    # same programs is a refusal, a new one is added to the county found.
+    r = run(seeded_url, "tools/make_county.py", "--name", taylor, ok=False)
+    assert r.returncode != 0 and "already a county" in r.stderr
+    r = run(seeded_url, "tools/make_county.py", "--name", taylor, "--program", "Probation=TAYLOR-PROB", ok=False)
+    assert r.returncode != 0 and "already has every program" in r.stderr
+    r = run(seeded_url, "tools/make_county.py", "--name", taylor, "--program", "Diversion=WASH-OWI", ok=False)
+    assert r.returncode != 0 and "already belongs to 'OWI Probation'" in r.stderr
+    r = run(seeded_url, "tools/make_county.py", "--name", taylor, "--program", "Diversion=TAYLOR-DIV")
+    assert f"found {taylor}" in r.stdout and "added program Diversion" in r.stdout
+    r = run(seeded_url, "tools/make_county.py", "--name", taylor, "--program", "no code", ok=False)
+    assert r.returncode != 0 and "Name=JOIN-CODE" in r.stderr
+
+    r = run(seeded_url, "tools/make_county.py", "--list")
+    assert "Washtenaw County: MI, America/Detroit, 3 staff, 11 participants" in r.stdout
+    assert f"{taylor}: MI, America/Detroit, 0 staff, 0 participants" in r.stdout
+    assert "    Diversion  [TAYLOR-DIV]" in r.stdout
+    r = run(seeded_url, "tools/make_county.py", ok=False)
+    assert r.returncode != 0 and "--list" in r.stderr
+
+    # Staff go in by the county's name, with a work number if there is one.
+    r = run(seeded_url, "tools/make_staff.py", "--name", "Kelsey Havener", "--email", "KHavener@example.gov",
+            "--role", "admin", "--county", taylor, "--phone", "734-555-0101")
+    assert "created admin Kelsey Havener <khavener@example.gov> +17345550101" in r.stdout
+    with Session(create_engine(seeded_url)) as db:
+        kelsey = db.scalar(select(User).where(User.email == "khavener@example.gov"))
+        assert kelsey.role == Role.admin and kelsey.county_id == county.id and kelsey.phone == "+17345550101"
+    r = run(seeded_url, "tools/make_staff.py", "--name", "Tracie", "--email", "tracie@example.gov",
+            "--role", "officer", "--county", taylor, "--phone", "734-374-132", ok=False)
+    assert r.returncode != 0 and "ten-digit" in r.stderr
+    r = run(seeded_url, "tools/make_county.py", "--list")
+    assert f"{taylor}: MI, America/Detroit, 1 staff, 0 participants" in r.stdout
 
 
 def test_retire_demo_deletes_the_county_and_keeps_everyone_else(seeded_url):
